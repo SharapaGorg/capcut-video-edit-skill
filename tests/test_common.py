@@ -126,3 +126,34 @@ def test_init_creates_config_and_dirs(tmp_path):
     assert (work / "PROGRESS.md").read_text(encoding="utf-8").startswith("# Прогресс монтажа")
     c = common.load_config(str(work / "config.json"))
     assert c.timeline_id == TID and c.work_dir == work
+
+
+def test_check_refs_segment_without_material_id():
+    d = json.loads((FIX / "draft_content.json").read_text(encoding="utf-8"))
+    del d["tracks"][0]["segments"][0]["material_id"]
+    d["tracks"][0]["segments"][1]["material_id"] = ""
+    assert common.check_refs(d) == []
+
+
+def test_find_effect_cache_no_cross_match(tmp_path):
+    (tmp_path / "1110").mkdir()
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "extra.json").write_text('{"resource_id":"2220"}', encoding="utf-8")
+    (tmp_path / "y").mkdir()
+    (tmp_path / "y" / "extra.json").write_text('{"effect_id":"222"}', encoding="utf-8")
+    assert common.find_effect_cache("111", cache_root=tmp_path) is None
+    assert common.find_effect_cache("1110", cache_root=tmp_path) == tmp_path / "1110"
+    assert common.find_effect_cache("222", cache_root=tmp_path) == tmp_path / "y"
+
+
+def test_find_effect_cache_no_localappdata(monkeypatch):
+    monkeypatch.setattr(common, "EFFECT_CACHE", None)
+    assert common.find_effect_cache("111") is None
+
+
+def test_backup_twice_in_a_row(proj):
+    p, cp = proj
+    cfg = common.load_config(str(cp))
+    a = common.backup(cfg, "s")
+    b = common.backup(cfg, "s")
+    assert a != b and a.is_dir() and b.is_dir()

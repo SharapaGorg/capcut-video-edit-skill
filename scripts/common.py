@@ -15,9 +15,10 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_LAD = Path(os.environ.get("LOCALAPPDATA", ""))
-PROJECTS_ROOT = _LAD / "CapCut" / "User Data" / "Projects" / "com.lveditor.draft"
-EFFECT_CACHE = _LAD / "CapCut" / "User Data" / "Cache" / "effect"
+_LAD = Path(os.environ["LOCALAPPDATA"]) if os.environ.get("LOCALAPPDATA") else None
+_CC = _LAD / "CapCut" / "User Data" if _LAD else Path("__no_localappdata__")
+PROJECTS_ROOT = _CC / "Projects" / "com.lveditor.draft"
+EFFECT_CACHE = _CC / "Cache" / "effect" if _LAD else None
 
 
 @dataclass
@@ -64,7 +65,7 @@ def load_config(path: str | None = None) -> Config:
         music_dir=raw.get("music_dir"),
         master_render=raw.get("master_render"),
         work_dir=Path(raw["work_dir"]) if raw.get("work_dir") else p.resolve().parent,
-        tiktok_channel=raw.get("tiktok_channel", raw.get("TIKTOK_CHANNEL")),
+        tiktok_channel=raw.get("tiktok_channel"),
         description_md=raw.get("description_md"),
     )
 
@@ -96,8 +97,12 @@ def ensure_capcut_closed() -> None:
 
 
 def backup(cfg: Config, stage: str) -> Path:
-    dst = cfg.work_dir / "backups" / f"{stage}-before-{time.strftime('%Y%m%d-%H%M%S')}"
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    base = cfg.work_dir / "backups" / f"{stage}-before-{time.strftime('%Y%m%d-%H%M%S')}"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    dst, n = base, 1
+    while dst.exists():
+        n += 1
+        dst = base.with_name(f"{base.name}-{n}")
     shutil.copytree(cfg.project_dir, dst)
     return dst
 
@@ -173,8 +178,8 @@ def check_refs(draft) -> list[str]:
         jx = index(d.get("materials", {}))
         for t in d.get("tracks", []):
             for s in t.get("segments", []):
-                for mid in [s["material_id"]] + list(s.get("extra_material_refs", [])):
-                    if mid not in jx:
+                for mid in [s.get("material_id")] + list(s.get("extra_material_refs") or []):
+                    if mid and mid not in jx:
                         errs.append(f"{label}: dangling ref {mid} in segment {s.get('id')}")
         for dm in d.get("materials", {}).get("drafts", []) or []:
             if isinstance(dm.get("draft"), dict):
@@ -192,21 +197,33 @@ def sec(us: int) -> float:
     return us / 1_000_000
 
 
+_ID_KEYS = {"resource_id", "effect_id", "id"}
+
+
+def _json_has_id(obj, rid: str) -> bool:
+    if isinstance(obj, dict):
+        return any((k in _ID_KEYS and str(v) == rid) or _json_has_id(v, rid) for k, v in obj.items())
+    if isinstance(obj, list):
+        return any(_json_has_id(v, rid) for v in obj)
+    return False
+
+
 def find_effect_cache(resource_id: str, cache_root: Path | None = None) -> Path | None:
-    """Cache/effect/<dir> whose name or any JSON inside (extra.json etc.) contains resource_id."""
+    """Cache/effect/<dir> whose name equals resource_id, or whose JSON (extra.json etc.) has
+    resource_id/effect_id/id == resource_id exactly. None if not found or LOCALAPPDATA unset."""
     root = Path(cache_root) if cache_root else EFFECT_CACHE
-    if not root.is_dir():
+    if root is None or not root.is_dir():
         return None
     rid = str(resource_id)
-    for d in sorted(root.iterdir()):
-        if not d.is_dir():
-            continue
-        if rid in d.name:
+    dirs = sorted(d for d in root.iterdir() if d.is_dir())
+    for d in dirs:
+        if d.name == rid:
             return d
+    for d in dirs:
         for j in d.rglob("*.json"):
             try:
-                if rid in j.read_text(encoding="utf-8", errors="ignore"):
+                if _json_has_id(json.loads(j.read_text(encoding="utf-8", errors="ignore")), rid):
                     return d
-            except OSError:
+            except (OSError, ValueError):
                 pass
     return None

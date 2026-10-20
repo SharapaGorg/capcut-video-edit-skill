@@ -1,6 +1,7 @@
 """Create the work folder of a video: subdirs, config.json, PROGRESS.md.
 
 python -X utf8 init_video.py --sources E:/video --project "<name or path>" [--work DIR] [--sfx DIR] [--music DIR]
+No --config flag: this script creates config.json (in the work dir).
 """
 import argparse
 import json
