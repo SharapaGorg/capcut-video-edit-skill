@@ -1,4 +1,7 @@
 import json
+import os
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -9,7 +12,7 @@ FIX = Path(__file__).parent / "fixtures" / "mini_project" / "draft_content.json"
 TPL = Path(__file__).resolve().parent.parent / "assets" / "templates"
 NAMES = ["voice_crisper", "reduce_noise", "deep_effect", "mask_circle", "adjust_circle",
          "adjustment_block", "keyframes_zoom", "sfx_segment", "music_segment"]
-FORBIDDEN = ["writelo", "Гайд", "IMG_E02", "E87DC4D2", "AiVideoEditing", "4-гайд", "shara"]
+FORBIDDEN = ["writelo", "Гайд", "Гайд конкуренты", "IMG_E02", "E87DC4D2", "AiVideoEditing", "4-гайд", "shara"]
 
 
 @pytest.fixture
@@ -33,6 +36,7 @@ def test_all_templates_exist_and_clean():
     for n in NAMES:
         text = (TPL / f"{n}.json").read_text(encoding="utf-8")
         assert not [f for f in FORBIDDEN if f in text], n
+        assert not re.search(r"Compound clip\d", text), n
         assert ":/" not in text.replace("{{", ""), n
 
 
@@ -127,3 +131,69 @@ def test_sfx_and_music_segment(draft):
     assert ix[s1["material_id"]][1]["path"] == "D:/sfx/click.wav"
     assert ix[s2["material_id"]][1]["name"] == "beat.mp3"
     assert "audio_fades" in {ix[e][0] for e in s2["extra_material_refs"]}
+
+
+def test_zoom_keyframes_uses_base_scale(draft):
+    seg = draft["tracks"][0]["segments"][0]
+    seg["clip"] = {"scale": {"x": 0.4, "y": 0.4}, "transform": {"x": 0.0, "y": 0.0}}
+    effects.zoom_keyframes(seg, 0.0, 2.0, 2.5, 1.5)
+    kf = {c["property_type"]: [k["values"][0] for k in c["keyframe_list"]] for c in seg["common_keyframes"]}
+    assert kf["KFTypeScaleX"] == pytest.approx([0.4, 0.6, 0.6, 0.4])
+    assert kf["KFTypeScaleY"] == pytest.approx([0.4, 0.6, 0.6, 0.4])
+    assert seg["clip"]["scale"] == {"x": 0.4, "y": 0.4}
+
+
+def test_make_raises_when_cache_dir_empty(draft, tmp_path):
+    root = tmp_path / "effect"
+    (root / "7491147795483659521").mkdir(parents=True)
+    with pytest.raises(effects.EffectCacheMissing):
+        effects.make("voice_crisper", draft, cache_root=root)
+    assert "audio_effects" not in draft["materials"]
+
+
+def test_mask_uses_template_hash_when_present(draft, cache):
+    d = cache / "1068046525"
+    tpl_hash = d / "3ab1c47350d987c8ad415497e020a38b"
+    tpl_hash.mkdir()
+    (d / "zzz").mkdir()
+    os.utime(d / "zzz", (time.time() + 100, time.time() + 100))
+    effects.make("mask_circle", draft, cache_root=cache)
+    assert Path(draft["materials"]["common_mask"][0]["path"]) == tpl_hash
+
+
+def test_hash_fallback_picks_newest(draft, cache):
+    d = cache / "1068046525"
+    (d / "aaa").mkdir()
+    os.utime(d / "otherhash", (time.time() - 1000, time.time() - 1000))
+    os.utime(d / "aaa", (time.time() + 100, time.time() + 100))
+    effects.make("mask_circle", draft, cache_root=cache)
+    assert Path(draft["materials"]["common_mask"][0]["path"]) == d / "aaa"
+
+
+def test_adjustment_segment(draft, cache):
+    from common import check_refs, index
+    track = {"type": "adjust", "segments": []}
+    sid = effects.adjustment_segment(draft, track, 0, 4_000_000, cache_root=cache)
+    draft["tracks"].append(track)
+    assert not check_refs(draft)
+    s = track["segments"][0]
+    assert s["id"] == sid and s["target_timerange"] == {"start": 0, "duration": 4_000_000}
+    ix = index(draft["materials"])
+    assert ix[s["material_id"]][1]["type"] == "adjust"
+    assert {ix[e][1]["type"] for e in s["extra_material_refs"]} == {"temperature", "saturation", "hsl"}
+
+
+def test_make_audio_templates_directly_raises(draft):
+    for n in ("sfx_segment", "music_segment"):
+        with pytest.raises(ValueError):
+            effects.make(n, draft)
+    assert "audios" not in draft["materials"]
+
+
+def test_music_short_fade(draft):
+    from common import index
+    track = {"type": "audio", "segments": []}
+    effects.music_segment(draft, track, "D:/m/a.mp3", 0, 400_000, 0.2)
+    ix = index(draft["materials"])
+    f = [ix[e][1] for e in track["segments"][0]["extra_material_refs"] if ix[e][0] == "audio_fades"][0]
+    assert f["fade_out_duration"] == 200_000

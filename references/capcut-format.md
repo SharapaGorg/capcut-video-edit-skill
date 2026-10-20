@@ -73,6 +73,8 @@
 | music_segment | audios + те же + audio_fades | — | материал + сегмент музыки; Deep отдельно |
 
 - `effects.make(name, draft, cache_root=None, **overrides) -> id` — клон primary + extra, overrides (ключи через точку) — в primary. `make_all` → все id (adjust_circle, adjustment_block). `attach(seg, id)` → `extra_material_refs`.
-- Поиск кэша: `find_effect_cache(cache_id)` → папка `Cache/effect/<cache_id>`; подпапка-хэш из шаблона, если есть, иначе первая существующая. Не найдено → `EffectCacheMissing` («примените его в CapCut один раз вручную»), в драфт ничего не добавлено. Для маски `cache_id` ≠ `resource_id`.
-- `zoom_keyframes(seg, t_in, t_hold, t_out, scale, cx, cy)` — секунды от начала сегмента; ключи t_in (1.0) → t_in+ramp (scale) → t_hold (scale) → t_out (1.0), ramp = t_out − t_hold; Position X/Y — только при cx/cy ≠ 0; всё вне сегмента → ValueError.
+- Поиск кэша: `find_effect_cache(cache_id)` → папка `Cache/effect/<cache_id>`; подпапка-хэш из шаблона, если есть, иначе первая существующая. Не найдено → `EffectCacheMissing` («примените его в CapCut один раз вручную»), в драфт ничего не добавлено. Для маски `cache_id` ≠ `resource_id`. Папка есть, но пустая → тоже `EffectCacheMissing`; хэша шаблона нет → самая новая подпапка (mtime).
+- `id` и `constant_material_id` в исходном проекте различаются (audio_effects, маска, hsl) → каждый `{{ID}}` получает свой новый id.
+- `adjustment_segment(draft, track, start_us, duration_us)` — блок Adjustment целиком (материалы + сегмент). `make('sfx_segment'/'music_segment')` → ValueError, только через хелперы; у музыки fade-out = min(300 мс, длительность/2).
+- `zoom_keyframes(seg, t_in, t_hold, t_out, scale, cx, cy)` — секунды от начала сегмента; база = текущий clip.scale (кружок 0.4); ключи t_in (база) → t_in+ramp (база×scale) → t_hold → t_out (база); clip.scale не меняется, ramp = t_out − t_hold; Position X/Y — только при cx/cy ≠ 0; всё вне сегмента → ValueError.
 - Значения Adjust в шаблонах выставлены по правилам (−18 / 10), в исходном проекте блок был другим (temperature −0.08, vignetting 0.1).

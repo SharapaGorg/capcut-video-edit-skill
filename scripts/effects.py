@@ -3,7 +3,8 @@
 Templates are harvested by harvest_templates.py; format and rules: references/capcut-format.md
 ("Шаблоны эффектов"). Placeholders: {{ID}} -> fresh id, {{CACHE}}/<cache_id>/<hash>/... -> the
 actual Cache/effect dir found by find_effect_cache(cache_id), {{CAPCUT_APP}}/... -> newest
-CapCut/Apps/<version> dir. Nothing is added to the draft if any placeholder cannot be resolved.
+CapCut/Apps/<version> dir. Every {{ID}} gets its own fresh id (in the source project id and
+constant_material_id differ, so they are not kept equal). Nothing is added to the draft if any placeholder cannot be resolved.
 """
 from __future__ import annotations
 
@@ -59,10 +60,13 @@ def _resolve(obj, tpl: dict, cache_root):
                 raise EffectCacheMissing(tpl["name"], tpl.get("resource_id") or cid)
             if h:
                 if not (d / h).is_dir():
-                    subs = sorted(x for x in d.iterdir() if x.is_dir())
-                    if subs:
-                        h = subs[0].name
+                    subs = [x for x in d.iterdir() if x.is_dir()]
+                    if not subs:  # empty cache dir -> dead path; CapCut would silently ignore the effect
+                        raise EffectCacheMissing(tpl["name"], tpl.get("resource_id") or cid)
+                    h = max(subs, key=lambda x: x.stat().st_mtime).name  # newest download
                 d = d / h
+            elif not any(d.iterdir()):
+                raise EffectCacheMissing(tpl["name"], tpl.get("resource_id") or cid)
             return (d.as_posix() + rest)
         if s.startswith(_APP):
             if not app:
@@ -93,8 +97,9 @@ def _set_dotted(d: dict, key: str, value) -> None:
 
 def _build(name: str, cache_root, overrides) -> tuple[dict, list[tuple[str, dict]]]:
     tpl = load_template(name)
-    if not tpl.get("category") or tpl.get("material") is None:
-        raise ValueError(f"template {name} has no material (use the dedicated helper)")
+    if not tpl.get("category") or tpl.get("material") is None or name in ("sfx_segment", "music_segment"):
+        raise ValueError(f"template {name}: use the dedicated helper "
+                         "(sfx_segment()/music_segment()/zoom_keyframes())")
     items = [(tpl["category"], tpl["material"])] + [(e["category"], e["material"]) for e in tpl.get("extra", [])]
     built = [(cat, _resolve(m, tpl, cache_root)) for cat, m in items]
     for k, v in overrides.items():
@@ -132,8 +137,9 @@ def attach(seg: dict, material_id: str) -> None:
 def zoom_keyframes(seg: dict, t_in: float, t_hold: float, t_out: float, scale: float,
                    cx: float = 0.0, cy: float = 0.0) -> None:
     """Zoom on a segment; times in seconds from segment start.
-    t_in: zoom-in starts (1.0); ramp = t_out - t_hold; t_in+ramp .. t_hold: hold at `scale`;
-    t_out: back to 1.0. cx/cy: clip.transform x/y at full zoom (PositionX/Y keys only if non-zero).
+    Base = current clip.scale x/y (e.g. 0.4 for the circle), zoomed = base * scale; clip.scale untouched.
+    t_in: zoom-in starts (base); ramp = t_out - t_hold; t_in+ramp .. t_hold: hold at `scale`;
+    t_out: back to base. cx/cy: clip.transform x/y at full zoom (PositionX/Y keys only if non-zero).
     Replaces existing Scale/Position keyframes. ValueError if any key falls outside the segment."""
     dur = seg["target_timerange"]["duration"]
     ramp = t_out - t_hold
@@ -142,7 +148,9 @@ def zoom_keyframes(seg: dict, t_in: float, t_hold: float, t_out: float, scale: f
         raise ValueError(f"zoom keys {times} us must be increasing and within segment duration {dur} us "
                          f"(t_in + (t_out - t_hold) <= t_hold)")
     tpl = load_template("keyframes_zoom")
-    props = {"KFTypeScaleX": [1.0, scale, scale, 1.0], "KFTypeScaleY": [1.0, scale, scale, 1.0]}
+    sc = (seg.get("clip") or {}).get("scale") or {}
+    bx, by = float(sc.get("x", 1.0)), float(sc.get("y", 1.0))
+    props = {"KFTypeScaleX": [bx, bx * scale, bx * scale, bx], "KFTypeScaleY": [by, by * scale, by * scale, by]}
     if cx or cy:
         props["KFTypePositionX"] = [0.0, cx, cx, 0.0]
         props["KFTypePositionY"] = [0.0, cy, cy, 0.0]
@@ -157,10 +165,6 @@ def zoom_keyframes(seg: dict, t_in: float, t_hold: float, t_out: float, scale: f
             e["keyframe_list"].append(k)
         kept.append(e)
     seg["common_keyframes"] = kept
-    clip = seg.get("clip")
-    if isinstance(clip, dict):
-        clip.setdefault("scale", {})
-        clip["scale"].update(x=1.0, y=1.0)
 
 
 # ---- audio ----
@@ -170,6 +174,9 @@ def _audio_segment(name: str, draft, track, path, start_us, duration_us, volume)
     p = str(path).replace("\\", "/")
     mat.update(path=p, name=Path(p).name, duration=int(duration_us))
     extras = [(e["category"], _resolve(e["material"], tpl, None)) for e in tpl.get("extra", [])]
+    for cat, m in extras:
+        if cat == "audio_fades":
+            m["fade_out_duration"] = min(300_000, int(duration_us) // 2)
     _append(draft, [(tpl["category"], mat)] + extras)
     seg = _resolve(tpl["segment"], tpl, None)
     seg.update(material_id=mat["id"], extra_material_refs=[m["id"] for _, m in extras], volume=float(volume),
@@ -188,3 +195,16 @@ def sfx_segment(draft: dict, track: dict, path, start_us: int, duration_us: int,
 def music_segment(draft: dict, track: dict, path, start_us: int, duration_us: int, volume: float) -> str:
     """Like sfx_segment, with audio_fades. Deep: make('deep_effect', draft) + attach(seg, id)."""
     return _audio_segment("music_segment", draft, track, path, start_us, duration_us, volume)
+
+
+def adjustment_segment(draft: dict, track: dict, start_us: int, duration_us: int, cache_root=None) -> str:
+    """Adjustment block (Temp -18 / Sat 10) on a track of type adjust: placeholder material + effects + hsl,
+    segment from the template; returns segment id. One continuous block per full-screen camera run."""
+    tpl = load_template("adjustment_block")
+    seg = _resolve(tpl["segment"], tpl, cache_root)
+    ids = make_all("adjustment_block", draft, cache_root=cache_root)
+    seg.update(material_id=ids[0], extra_material_refs=ids[1:], source_timerange=None,
+               target_timerange={"start": int(start_us), "duration": int(duration_us)},
+               enable_adjust=True, enable_hsl=True)
+    track.setdefault("segments", []).append(seg)
+    return seg["id"]

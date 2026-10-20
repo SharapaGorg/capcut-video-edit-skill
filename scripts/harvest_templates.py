@@ -29,7 +29,7 @@ CACHE = re.compile(r"^.*/Cache/effect/(.+)$")
 APPS = re.compile(r"^.*/CapCut/Apps/[^/]+/(.+)$")
 ABS = re.compile(r"^([A-Za-z]:[/\\]|/|\\\\)")
 
-UI_TO_JSON = 0.02  # Adjust slider UI value -> JSON value (UI -18 -> -0.36)
+UI_TO_JSON = 0.02  # UI -> JSON; confirmed on video 1: temperature UI -27 -> -0.54 (PROGRESS)
 TEMP, SAT = -18 * UI_TO_JSON, 10 * UI_TO_JSON
 
 
