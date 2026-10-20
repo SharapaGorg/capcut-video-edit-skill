@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import PROJECTS_ROOT, new_id  # noqa: E402
+from common import PROJECTS_ROOT, ensure_capcut_closed, new_id  # noqa: E402
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "capcut_new" / "templates.json"
 EXTS = {".mp4", ".mov", ".m4a", ".mp3", ".wav"}
@@ -43,7 +43,11 @@ def sources_from_dir(root) -> dict:
 
     def get(n):
         return str(root / n) if (root / n).is_dir() else None
-    return {"camera": get("camera"), "screencasts": get("screencasts") or str(root), "voice": get("voice")}
+    sc = get("screencasts")
+    if sc is None:
+        print(f"warning: no screencasts/ in {root}; using the folder itself as screencasts", file=sys.stderr)
+        sc = str(root)
+    return {"camera": get("camera"), "screencasts": sc, "voice": get("voice")}
 
 
 def list_media(d) -> list[Path]:
@@ -171,7 +175,17 @@ def _write_skeleton(proj: Path, T: dict, tid: str, now_us: int) -> None:
     (proj / "draft_biz_config.json").write_text("", encoding="utf-8")
 
 
-def _register(rmi: Path, entry: dict) -> Path:
+def capcut_running() -> bool:
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq CapCut.exe", "/NH"],
+                         capture_output=True, text=True).stdout
+    return "capcut.exe" in out.lower()
+
+
+def _register(rmi: Path, entry: dict, kill: bool = True) -> Path:
+    if kill:
+        ensure_capcut_closed()
+    elif capcut_running():
+        raise RuntimeError("CapCut.exe is running; it rewrites root_meta_info.json from memory. Close it.")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     bak, n = rmi.with_name(f"{rmi.name}.bak-{stamp}"), 1
     while bak.exists():
@@ -186,7 +200,7 @@ def _register(rmi: Path, entry: dict) -> Path:
     return bak
 
 
-def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT) -> Path:
+def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT, kill: bool = True) -> Path:
     dst_root = Path(dst_root)
     proj = dst_root / name
     rmi = dst_root / "root_meta_info.json"
@@ -202,9 +216,13 @@ def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT) -> 
 
     b = _Builder(T, now_us)
     tracks = [b.video_track(screens, mute=False, render_index=0)]
+    if not tracks[0]["segments"]:
+        raise ValueError(f"нет видео в screencasts: {sources.get('screencasts')}")
     cams = list_media(sources.get("camera"))
     if cams:
-        tracks.append(b.video_track(cams, mute=True, render_index=1))
+        cam = b.video_track(cams, mute=True, render_index=1)
+        if cam["segments"]:
+            tracks.append(cam)
     voice = list_media(sources.get("voice"))
     if voice:
         tracks.append(b.audio_track(voice, render_index=len(tracks)))
@@ -216,6 +234,15 @@ def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT) -> 
     draft["canvas_config"].update(width=first["width"], height=first["height"], ratio="original")
 
     proj.mkdir(parents=True)
+    try:
+        _write_all(proj, rmi, dst_root, name, T, b, draft, tid, now_us, kill)
+    except BaseException:
+        shutil.rmtree(proj, ignore_errors=True)
+        raise
+    return proj
+
+
+def _write_all(proj, rmi, dst_root, name, T, b, draft, tid, now_us, kill) -> None:
     _dump(proj / "draft_content.json", draft)
     _dump(proj / "Timelines" / tid / "draft_content.json", draft)
     _write_skeleton(proj, T, tid, now_us)
@@ -224,7 +251,7 @@ def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT) -> 
     size = (proj / "draft_content.json").stat().st_size
     meta = copy.deepcopy(T["meta"])
     meta.update(draft_id=draft_id, draft_name=name, draft_fold_path=proj.as_posix(),
-                draft_root_path=str(dst_root), tm_draft_create=now_us, tm_draft_modified=now_us,
+                draft_root_path=str(dst_root).replace("/", "\\"), tm_draft_create=now_us, tm_draft_modified=now_us,
                 tm_duration=draft["duration"], draft_timeline_materials_size_=size)
     for grp in meta["draft_materials"]:
         grp["value"] = b.meta_mats if grp["type"] == 0 else []
@@ -235,8 +262,7 @@ def create_project(name: str, sources: dict, dst_root: Path = PROJECTS_ROOT) -> 
                draft_root_path=dst_root.as_posix(), draft_cover=proj.as_posix() + "\\draft_cover.jpg",
                draft_json_file=proj.as_posix() + "\\draft_content.json", draft_timeline_materials_size=size,
                tm_draft_create=now_us, tm_draft_modified=now_us, tm_duration=draft["duration"])
-    _register(rmi, ent)
-    return proj
+    _register(rmi, ent, kill=kill)
 
 
 def main(argv=None):
@@ -244,8 +270,9 @@ def main(argv=None):
     ap.add_argument("--name", required=True)
     ap.add_argument("--sources", required=True, help="folder with camera/, screencasts/, voice/")
     ap.add_argument("--dst-root", default=str(PROJECTS_ROOT))
+    ap.add_argument("--no-kill", action="store_true", help="fail if CapCut is running instead of killing it")
     a = ap.parse_args(argv)
-    print(create_project(a.name, sources_from_dir(a.sources), Path(a.dst_root)))
+    print(create_project(a.name, sources_from_dir(a.sources), Path(a.dst_root), kill=not a.no_kill))
 
 
 if __name__ == "__main__":
