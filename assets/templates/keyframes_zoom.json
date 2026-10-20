@@ -1,0 +1,50 @@
+{
+ "name": "keyframes_zoom",
+ "category": null,
+ "resource_id": null,
+ "cache_id": null,
+ "material": null,
+ "extra": [],
+ "segment": null,
+ "entry": {
+  "id": "{{ID}}",
+  "material_id": "",
+  "property_type": "KFTypeScaleX",
+  "keyframe_list": []
+ },
+ "keyframe": {
+  "id": "{{ID}}",
+  "curveType": "Line",
+  "time_offset": 953332,
+  "left_control": {
+   "x": 0.0,
+   "y": 0.0
+  },
+  "right_control": {
+   "x": 0.0,
+   "y": 0.0
+  },
+  "values": [
+   1.0
+  ],
+  "string_value": "",
+  "graphID": ""
+ },
+ "clip": {
+  "scale": {
+   "x": 1.1,
+   "y": 1.1
+  },
+  "rotation": 0.0,
+  "transform": {
+   "x": 0.0,
+   "y": 0.0
+  },
+  "flip": {
+   "vertical": false,
+   "horizontal": false
+  },
+  "alpha": 1.0
+ },
+ "notes": "segment.common_keyframes: one entry per property_type (KFTypeScaleX/Y, KFTypePositionX/Y); keyframe_list[].time_offset = us from segment start, values [v]. Creates no materials."
+}

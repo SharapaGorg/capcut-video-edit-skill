@@ -1,0 +1,21 @@
+{
+ "name": "reduce_noise",
+ "category": "realtime_denoises",
+ "resource_id": null,
+ "cache_id": null,
+ "material": {
+  "id": "{{ID}}",
+  "type": "realtime_denoise",
+  "is_denoise": true,
+  "denoise_mode": 1.0,
+  "denoise_rate": 0.85,
+  "path": "{{CAPCUT_APP}}/Resources/audiosami/unet_denoise_44k_music_model_v1.0.model",
+  "sami_name": "denoise_v2",
+  "sami_version": "1.0",
+  "sami_type": 2,
+  "is_from_hd_sounds": false
+ },
+ "extra": [],
+ "segment": null,
+ "notes": "Basic > Reduce noise. path is a model inside {{CAPCUT_APP}} (installed CapCut version dir), not Cache/effect."
+}

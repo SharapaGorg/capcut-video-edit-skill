@@ -1,0 +1,51 @@
+{
+ "name": "deep_effect",
+ "category": "audio_effects",
+ "resource_id": "7021052537344102913",
+ "cache_id": "7021052537344102913",
+ "material": {
+  "id": "{{ID}}",
+  "constant_material_id": "{{ID}}",
+  "type": "audio_effect",
+  "name": "Deep",
+  "path": "{{CACHE}}/7021052537344102913/583e3ccf9d2daad3860aa70ad61b64ca",
+  "production_path": "",
+  "sub_type": 1,
+  "time_range": {
+   "start": 0,
+   "duration": 0
+  },
+  "speaker_id": "",
+  "resource_id": "7021052537344102913",
+  "third_resource_id": "7021052537344102913",
+  "source_platform": 1,
+  "category_id": "sound_effect",
+  "category_name": "Voice filters",
+  "audio_adjust_params": [
+   {
+    "value": 0.834,
+    "default_value": 0.834,
+    "parameterIndex": 0,
+    "portIndex": 0,
+    "name": "change_voice_param_pitch",
+    "min_value": 0.0,
+    "max_value": 1.0
+   },
+   {
+    "value": 1.0,
+    "default_value": 1.0,
+    "parameterIndex": 1,
+    "portIndex": 0,
+    "name": "change_voice_param_timbre",
+    "min_value": 0.0,
+    "max_value": 1.0
+   }
+  ],
+  "is_vc_clone_tone": false,
+  "vc_type": "none",
+  "is_ugc": false
+ },
+ "extra": [],
+ "segment": null,
+ "notes": "Voice changer > Voice filters > Deep. On music segments."
+}

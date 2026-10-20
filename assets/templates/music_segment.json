@@ -1,0 +1,237 @@
+{
+ "name": "music_segment",
+ "category": "audios",
+ "resource_id": null,
+ "cache_id": null,
+ "material": {
+  "id": "{{ID}}",
+  "unique_id": "",
+  "type": "extract_music",
+  "name": "{{NAME}}",
+  "duration": 182100000,
+  "path": "{{PATH}}",
+  "category_name": "local",
+  "wave_points": [],
+  "music_id": "",
+  "app_id": 0,
+  "text_id": "",
+  "tone_type": "",
+  "source_platform": 0,
+  "video_id": "",
+  "effect_id": "",
+  "resource_id": "",
+  "third_resource_id": "",
+  "category_id": "",
+  "intensifies_path": "",
+  "formula_id": "",
+  "check_flag": 1,
+  "team_id": "",
+  "local_material_id": "",
+  "tone_speaker": "",
+  "mock_tone_speaker": "",
+  "tone_effect_id": "",
+  "tone_effect_name": "",
+  "tone_platform": "",
+  "cloned_model_type": "",
+  "tone_category_id": "",
+  "tone_category_name": "",
+  "tone_second_category_id": "",
+  "tone_second_category_name": "",
+  "tone_emotion_name_key": "",
+  "tone_emotion_style": "",
+  "tone_emotion_role": "",
+  "tone_emotion_selection": "",
+  "tone_emotion_scale": 0.0,
+  "moyin_emotion": "",
+  "request_id": "",
+  "query": "",
+  "search_id": "",
+  "sound_separate_type": "",
+  "is_text_edit_overdub": false,
+  "is_ugc": false,
+  "is_ai_clone_tone": false,
+  "is_ai_clone_tone_post": false,
+  "source_from": "",
+  "copyright_limit_type": "none",
+  "aigc_history_id": "",
+  "aigc_item_id": "",
+  "music_source": "",
+  "pgc_id": "",
+  "pgc_name": "",
+  "similiar_music_info": {
+   "original_song_id": "",
+   "original_song_name": ""
+  },
+  "ai_music_type": 0,
+  "ai_music_enter_from": "",
+  "lyric_type": 0,
+  "tts_task_id": "",
+  "tts_generate_scene": "",
+  "ai_music_generate_scene": 0,
+  "tts_benefit_info": {
+   "benefit_type": "none",
+   "benefit_log_id": "",
+   "benefit_log_extra": "",
+   "benefit_amount": -1
+  },
+  "tts_language_info": null,
+  "is_ai_generate_content": false,
+  "aigc_audio_type": "none",
+  "aigc_audio_generate_info": null
+ },
+ "extra": [
+  {
+   "category": "speeds",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "speed",
+    "mode": 0,
+    "speed": 1.0,
+    "curve_speed": null
+   }
+  },
+  {
+   "category": "placeholder_infos",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "placeholder_info",
+    "meta_type": "none",
+    "res_path": "",
+    "res_text": "",
+    "error_path": "",
+    "error_text": ""
+   }
+  },
+  {
+   "category": "audio_fades",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "audio_fade",
+    "fade_type": 0,
+    "fade_in_duration": 0,
+    "fade_out_duration": 300000
+   }
+  },
+  {
+   "category": "beats",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "beats",
+    "enable_ai_beats": false,
+    "gear": 404,
+    "gear_count": 0,
+    "mode": 404,
+    "user_beats": [],
+    "user_delete_ai_beats": null,
+    "ai_beats": {
+     "melody_url": "",
+     "melody_path": "",
+     "beats_url": "",
+     "beats_path": "",
+     "melody_percents": [
+      0.0
+     ],
+     "beat_speed_infos": []
+    }
+   }
+  },
+  {
+   "category": "sound_channel_mappings",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "none",
+    "audio_channel_mapping": 0,
+    "is_config_open": false
+   }
+  },
+  {
+   "category": "vocal_separations",
+   "cache_id": null,
+   "material": {
+    "id": "{{ID}}",
+    "type": "vocal_separation",
+    "choice": 0,
+    "removed_sounds": [],
+    "time_range": null,
+    "production_path": "",
+    "final_algorithm": "",
+    "enter_from": ""
+   }
+  }
+ ],
+ "segment": {
+  "id": "{{ID}}",
+  "source_timerange": {
+   "start": 0,
+   "duration": 6700000
+  },
+  "target_timerange": {
+   "start": 0,
+   "duration": 6700000
+  },
+  "render_timerange": {
+   "start": 0,
+   "duration": 0
+  },
+  "desc": "",
+  "state": 0,
+  "speed": 1.0,
+  "is_loop": false,
+  "is_tone_modify": false,
+  "reverse": false,
+  "intensifies_audio": false,
+  "cartoon": false,
+  "volume": 1.0,
+  "last_nonzero_volume": 1.0,
+  "clip": null,
+  "uniform_scale": null,
+  "material_id": "{{ID}}",
+  "extra_material_refs": [],
+  "render_index": 0,
+  "keyframe_refs": [],
+  "enable_lut": false,
+  "enable_adjust": false,
+  "enable_hsl": false,
+  "visible": true,
+  "group_id": "",
+  "enable_color_curves": true,
+  "enable_hsl_curves": true,
+  "track_render_index": 5,
+  "hdr_settings": null,
+  "hdr_vivid_settings": null,
+  "enable_color_wheels": true,
+  "track_attribute": 0,
+  "is_placeholder": false,
+  "template_id": "",
+  "enable_smart_color_adjust": false,
+  "template_scene": "default",
+  "common_keyframes": [],
+  "caption_info": null,
+  "responsive_layout": {
+   "enable": false,
+   "target_follow": "",
+   "size_layout": 0,
+   "horizontal_pos_layout": 0,
+   "vertical_pos_layout": 0
+  },
+  "enable_color_match_adjust": false,
+  "enable_color_correct_adjust": false,
+  "enable_adjust_mask": false,
+  "raw_segment_id": "",
+  "lyric_keyframes": null,
+  "enable_video_mask": true,
+  "digital_human_template_group_id": "",
+  "color_correct_alg_result": "",
+  "source": "segmentsourcenormal",
+  "enable_mask_stroke": false,
+  "enable_mask_shadow": false,
+  "enable_color_adjust_pro": false,
+  "segment_color_tag": ""
+ },
+ "notes": "Music: like SFX + audio_fades. Deep is not included: make('deep_effect') + attach."
+}

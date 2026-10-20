@@ -1,0 +1,42 @@
+{
+ "name": "voice_crisper",
+ "category": "audio_effects",
+ "resource_id": "7491147795483659521",
+ "cache_id": "7491147795483659521",
+ "material": {
+  "id": "{{ID}}",
+  "constant_material_id": "{{ID}}",
+  "type": "audio_effect",
+  "name": "Voice Crisper",
+  "path": "{{CACHE}}/7491147795483659521/afa899afa9b93e99cce244324bffe563",
+  "production_path": "",
+  "sub_type": 1,
+  "time_range": {
+   "start": 0,
+   "duration": 0
+  },
+  "speaker_id": "",
+  "resource_id": "7491147795483659521",
+  "third_resource_id": "0",
+  "source_platform": 1,
+  "category_id": "sound_effect",
+  "category_name": "Voice filters",
+  "audio_adjust_params": [
+   {
+    "value": 1.0,
+    "default_value": 1.0,
+    "parameterIndex": 0,
+    "portIndex": 0,
+    "name": "strength",
+    "min_value": 0.0,
+    "max_value": 1.0
+   }
+  ],
+  "is_vc_clone_tone": false,
+  "vc_type": "none",
+  "is_ugc": false
+ },
+ "extra": [],
+ "segment": null,
+ "notes": "Voice changer > Voice filters > Voice Crisper, Strength 100 (strength 1.0). On voice segments."
+}

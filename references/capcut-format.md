@@ -55,3 +55,24 @@
 
 **Проверка 2026-10-20 (CapCut 9.5, zz-autotest-1: 2 скринкаста + камера + m4a).** После запуска CapCut проект виден на главном экране: имя zz-autotest-1, «25.0K | 00:06» (длительность верная), обложка чёрная. CapCut за 30 с не переписал root_meta_info.json и ни один файл проекта. Открыть проект в редакторе не удалось проверить (без доступа к UI; пользователь работал за машиной). После закрытия CapCut запись в root_meta_info на месте.
 **STATUS: EXPERIMENTAL.** Не проверено: открытие в редакторе, клипы на дорожках/превью, что CapCut не «починит» драфт при открытии, проигрывание звука m4a как extract_music. Fallback — свалка от пользователя.
+
+## Шаблоны эффектов (assets/templates, scripts/effects.py)
+
+Сняты `scripts/harvest_templates.py --project <dir>` с готового проекта первого ролика. Файл: `name`, `category` (ключ `materials.<category>`), `resource_id`, `cache_id` (имя папки в `Cache/effect`), `material`, `extra` [{category, material}], `segment` (шаблон сегмента или null), `notes`. Плейсхолдеры: `{{ID}}` → новый id; `{{CACHE}}/<cache_id>/<hash>/…` → актуальная папка кэша; `{{CAPCUT_APP}}/…` → новейшая `CapCut/Apps/<версия>`; `{{PATH}}`/`{{NAME}}` — файл аудио.
+
+| Шаблон | materials.<category> | resource_id / cache_id | Что |
+|---|---|---|---|
+| voice_crisper | audio_effects | 7491147795483659521 / то же | Voice Crisper, strength 1.0 |
+| reduce_noise | realtime_denoises | — / модель в `{{CAPCUT_APP}}/Resources/audiosami` | Reduce noise (denoise_rate 0.85) |
+| deep_effect | audio_effects | 7021052537344102913 / то же | Deep (музыка) |
+| mask_circle | common_mask | 7374021188315517456 / **1068046525** | круг, type mask, category video, config = положение |
+| adjust_circle | effects (+extra effects saturation, hsl) | 7501974767453474064 / то же | Adjust на клипе: temperature −0.36, saturation 0.2 |
+| adjustment_block | placeholders (type adjust) + effects×2 + hsl | — | блок на дорожке type adjust, сегмент source_timerange null |
+| keyframes_zoom | — | — | форма записи `common_keyframes` и ключа (curveType Line) |
+| sfx_segment | audios (extract_music) + speeds, placeholder_infos, beats, sound_channel_mappings, loudnesses, vocal_separations | — | материал + сегмент SFX |
+| music_segment | audios + те же + audio_fades | — | материал + сегмент музыки; Deep отдельно |
+
+- `effects.make(name, draft, cache_root=None, **overrides) -> id` — клон primary + extra, overrides (ключи через точку) — в primary. `make_all` → все id (adjust_circle, adjustment_block). `attach(seg, id)` → `extra_material_refs`.
+- Поиск кэша: `find_effect_cache(cache_id)` → папка `Cache/effect/<cache_id>`; подпапка-хэш из шаблона, если есть, иначе первая существующая. Не найдено → `EffectCacheMissing` («примените его в CapCut один раз вручную»), в драфт ничего не добавлено. Для маски `cache_id` ≠ `resource_id`.
+- `zoom_keyframes(seg, t_in, t_hold, t_out, scale, cx, cy)` — секунды от начала сегмента; ключи t_in (1.0) → t_in+ramp (scale) → t_hold (scale) → t_out (1.0), ramp = t_out − t_hold; Position X/Y — только при cx/cy ≠ 0; всё вне сегмента → ValueError.
+- Значения Adjust в шаблонах выставлены по правилам (−18 / 10), в исходном проекте блок был другим (temperature −0.08, vignetting 0.1).
