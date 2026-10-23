@@ -157,3 +157,65 @@ def test_backup_twice_in_a_row(proj):
     a = common.backup(cfg, "s")
     b = common.backup(cfg, "s")
     assert a != b and a.is_dir() and b.is_dir()
+
+
+def _init(src, proj, *extra):
+    r = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPTS / "init_video.py"),
+                        "--sources", str(src), "--project", str(proj), *extra],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, r.stderr
+    return r
+
+
+def _fps25(proj):
+    for p in [proj / "draft_content.json", *proj.glob("Timelines/*/draft_content.json")]:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d["fps"] = 25.0
+        d["canvas_config"].update(width=1280, height=720)
+        p.write_text(json.dumps(d), encoding="utf-8")
+
+
+def test_init_reads_fps_and_size_from_draft(tmp_path, capsys, monkeypatch):
+    """I3: a 25-fps 1280×720 project -> config fps 25, 1280×720; a config that disagrees with the draft warns,
+    and fails with strict (or VIDEO_EDIT_STRICT=1)."""
+    src, proj = tmp_path / "src", tmp_path / "proj"
+    src.mkdir()
+    shutil.copytree(FIX, proj)
+    _fps25(proj)
+    _init(src, proj)
+    cp = src / "edit" / "config.json"
+    raw = json.loads(cp.read_text(encoding="utf-8"))
+    assert (raw["fps"], raw["width"], raw["height"]) == (25, 1280, 720)
+    capsys.readouterr()
+    c = common.load_config(str(cp))
+    assert c.fps == 25 and "warning" not in capsys.readouterr().err
+    raw["fps"] = 30
+    cp.write_text(json.dumps(raw), encoding="utf-8")
+    common.load_config(str(cp))
+    assert "fps 30 != draft 25" in capsys.readouterr().err
+    with pytest.raises(SystemExit, match="fps 30 != draft 25"):
+        common.load_config(str(cp), strict=True)
+    monkeypatch.setenv("VIDEO_EDIT_STRICT", "1")
+    with pytest.raises(SystemExit):
+        common.load_config(str(cp))
+
+
+def test_init_rerun_merges_config(tmp_path):
+    """I4: a re-run keeps what later stages wrote (compounds, master_render, tiktok_channel); --force overwrites."""
+    src, proj = tmp_path / "src", tmp_path / "proj"
+    src.mkdir()
+    shutil.copytree(FIX, proj)
+    _init(src, proj)
+    cp = src / "edit" / "config.json"
+    raw = json.loads(cp.read_text(encoding="utf-8"))
+    raw.update(compounds={"mic": "M", "cam_full": ["F1"], "screencast": "S", "circle": "C"}, master_render="m.mp4",
+               tiktok_channel="@chan", sfx_dir="E:/sfx")
+    cp.write_text(json.dumps(raw), encoding="utf-8")
+    r = _init(src, proj, "--music", "E:/music")
+    new = json.loads(cp.read_text(encoding="utf-8"))
+    assert new["compounds"]["mic"] == "M" and new["master_render"] == "m.mp4" and new["tiktok_channel"] == "@chan"
+    assert new["sfx_dir"] == "E:/sfx" and new["music_dir"] == "E:/music"   # missing value filled
+    assert "merged" in r.stdout
+    _init(src, proj, "--force")
+    new = json.loads(cp.read_text(encoding="utf-8"))
+    assert new["compounds"]["mic"] is None and new["master_render"] is None

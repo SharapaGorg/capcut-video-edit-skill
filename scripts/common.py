@@ -54,14 +54,17 @@ def detect_timeline_id(project_dir) -> str:
     return dirs[0]
 
 
-def load_config(path: str | None = None) -> Config:
+def load_config(path: str | None = None, strict: bool | None = None) -> Config:
+    """config.json (default: cwd). fps / width / height are compared with the project's draft (fps,
+    canvas_config): a difference -> a warning on stderr, or SystemExit with strict (strict=None -> the env var
+    VIDEO_EDIT_STRICT=1). No readable draft -> no check."""
     p = Path(path) if path else Path.cwd() / "config.json"
     raw = json.loads(p.read_text(encoding="utf-8"))
     project_dir = Path(raw["project_dir"])
     tid = raw.get("timeline_id") or detect_timeline_id(project_dir)
     src = dict(raw.get("sources") or {})
     src.setdefault("voice", None)
-    return Config(
+    cfg = Config(
         project_dir=project_dir,
         timeline_id=tid,
         sources=src,
@@ -81,6 +84,34 @@ def load_config(path: str | None = None) -> Config:
         tessdata=raw.get("tessdata"),
         config_path=p.resolve(),
     )
+    if strict is None:
+        strict = os.environ.get("VIDEO_EDIT_STRICT") == "1"
+    diff = format_mismatch(cfg)
+    if diff:
+        msg = (f"config.json ≠ проект: {'; '.join(diff)} — исправить fps/width/height в {p} "
+               "(init_video.py --force перечитает их из драфта)")
+        if strict:
+            raise SystemExit(msg)
+        import sys
+        print("warning: " + msg, file=sys.stderr)
+    return cfg
+
+
+def format_mismatch(cfg: Config) -> list[str]:
+    """['fps 30 != draft 25', ...] between cfg and the draft's fps / canvas_config; [] if equal or no draft."""
+    try:
+        d = read_draft(cfg)
+    except (OSError, ValueError):
+        return []
+    out = []
+    fps = d.get("fps")
+    if isinstance(fps, (int, float)) and abs(float(fps) - float(cfg.fps)) > 1e-3:
+        out.append(f"fps {cfg.fps} != draft {fps:g}")
+    cc = d.get("canvas_config") or {}
+    for k in ("width", "height"):
+        if isinstance(cc.get(k), (int, float)) and int(cc[k]) != int(getattr(cfg, k)):
+            out.append(f"{k} {getattr(cfg, k)} != draft {cc[k]}")
+    return out
 
 
 def save_config_field(cfg: Config, key: str, value) -> None:

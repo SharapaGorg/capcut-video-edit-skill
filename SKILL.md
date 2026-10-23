@@ -35,6 +35,7 @@ description: Монтаж ролика — монтаж длинного YouTube
   "master_maps": null
 }
 ```
+- `fps`/`width`/`height` — из драфта проекта (`init_video.py`); повторный запуск `init_video.py` дописывает конфиг, не затирая (`--force` — перезаписать).
 - `compounds` заполняет этап 2 §7 после сборки.
 - `sfx_dir`, `music_dir` неизвестны → спросить один раз.
 - Короткие (shorts.md): `tiktok_channel` / `tiktok_thumbnail` — концовка TikTok, `reels_word` — кодовое слово рилса, `master_maps` — карты таймлайна мастера, если он доделан в копии проекта (по умолчанию `stage3`).

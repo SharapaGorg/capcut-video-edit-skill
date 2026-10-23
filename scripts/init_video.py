@@ -1,7 +1,11 @@
 """Create the work folder of a video: subdirs, config.json, PROGRESS.md.
 
 python -X utf8 init_video.py --sources E:/video --project "<name or path>" [--work DIR] [--sfx DIR] [--music DIR]
+                             [--force]
 No --config flag: this script creates config.json (in the work dir).
+fps / width / height come from the project's draft (fps, canvas_config); 30 / 1920×1080 only without a draft.
+A re-run MERGES into an existing config.json: values already there (compounds, master_render, tiktok_channel, …)
+win; only missing / null keys are filled. --force: the freshly computed values overwrite them.
 """
 import argparse
 import json
@@ -11,6 +15,33 @@ from common import PROJECTS_ROOT, detect_timeline_id
 
 SUBDIRS = ["transcript"] + [f"stage{i}" for i in range(1, 11)] + ["layout", "graphics", "stage12_shorts", "backups"]
 STAGES = ["0", "1", "2", "3", "LAYOUT", "4", "5", "6", "7", "8", "9", "10", "shorts"]
+DEFAULT_FORMAT = {"fps": 30, "width": 1920, "height": 1080}
+
+
+def draft_format(proj: Path, tid: str | None) -> dict:
+    """{fps, width, height} of the project's draft (Timelines/<tid>, else the root mirror); defaults without one."""
+    for p in ([proj / "Timelines" / tid / "draft_content.json"] if tid else []) + [proj / "draft_content.json"]:
+        if p.is_file():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            cc = d.get("canvas_config") or {}
+            fps = d.get("fps") or DEFAULT_FORMAT["fps"]
+            fps = int(round(fps)) if abs(fps - round(fps)) < 1e-6 else float(fps)
+            return {"fps": fps, "width": int(cc.get("width") or DEFAULT_FORMAT["width"]),
+                    "height": int(cc.get("height") or DEFAULT_FORMAT["height"])}
+    return dict(DEFAULT_FORMAT)
+
+
+def merge(old: dict, new: dict, force: bool) -> tuple[dict, list[str]]:
+    """new over old only where old has no value (or force). -> (merged, keys kept from old that differ)."""
+    if force:
+        return dict(old, **new), []
+    out, kept = dict(new), []
+    for k, v in old.items():
+        if v is not None:
+            if k in new and new[k] != v:
+                kept.append(k)
+            out[k] = v
+    return out, kept
 
 
 def main(argv=None):
@@ -20,6 +51,7 @@ def main(argv=None):
     ap.add_argument("--work")
     ap.add_argument("--sfx")
     ap.add_argument("--music")
+    ap.add_argument("--force", action="store_true", help="overwrite an existing config.json's values")
     a = ap.parse_args(argv)
     src = Path(a.sources).resolve()
     proj = Path(a.project)
@@ -35,7 +67,7 @@ def main(argv=None):
         "timeline_id": tid,
         "sources": {"camera": str(src / "camera"), "screencasts": str(src / "screencasts"),
                     "voice": str(voice) if voice.is_dir() else None},
-        "fps": 30, "width": 1920, "height": 1080,
+        **draft_format(proj, tid),
         "compounds": {"mic": None, "cam_full": [], "screencast": None, "circle": None},
         "sfx_dir": a.sfx, "music_dir": a.music,
         "description_md": str(work / "description.md"),
@@ -48,6 +80,10 @@ def main(argv=None):
         "tessdata": None,
     }
     cp = work / "config.json"
+    if cp.is_file():
+        cfg, kept = merge(json.loads(cp.read_text(encoding="utf-8")), cfg, a.force)
+        print(f"config.json exists: merged ({'--force: new values win' if a.force else 'existing values kept'})"
+              + (f"; kept differing: {', '.join(kept)} (--force to overwrite)" if kept else ""))
     cp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     pg = work / "PROGRESS.md"
     if not pg.exists():
