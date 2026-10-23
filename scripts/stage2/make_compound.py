@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -211,6 +212,43 @@ def prerender_audio(project_dir: Path, comp: Compound, log=print) -> Path | None
     return aac
 
 
+PLACEHOLDER_RE = re.compile(r"^##_draftpath_placeholder_[^#]*_##")
+
+
+def project_path(cfg, p: str) -> str:
+    """CapCut path with the draft placeholder -> real path, forward slashes."""
+    return PLACEHOLDER_RE.sub(lambda _m: cfg.project_dir.as_posix(), p.replace("\\", "/"))
+
+
+def sub_config_path(cfg, dm: dict) -> Path:
+    """subdraft/<folder>/sub_draft_config.json of a drafts entry (draft_config_path, else by nested id)."""
+    cp = dm.get("draft_config_path")
+    return Path(project_path(cfg, cp)) if cp else \
+        cfg.project_dir / "subdraft" / str((dm.get("draft") or {}).get("id")) / "sub_draft_config.json"
+
+
+def stale_prerender(cfg, dm: dict) -> tuple[Path, str] | None:
+    """(sub_draft_config path, audio_path) when the compound has an audio pre-render, else None."""
+    p = sub_config_path(cfg, dm)
+    if p.is_file():
+        ap = json.loads(p.read_text(encoding="utf-8")).get("audio_path") or ""
+        if ap:
+            return p, ap
+    return None
+
+
+def clear_prerender(cfg, sub: Path, audio_path: str) -> None:
+    """Delete the .aac pre-render and clear audio_path (rules.md: after any edit inside an audio compound)."""
+    aac = Path(project_path(cfg, audio_path))
+    if not aac.is_absolute():  # CapCut writes it relative to subdraft/<id>/ (../../Resources/combination/…)
+        aac = sub.parent / aac
+    if aac.is_file():
+        aac.unlink()
+    c = json.loads(sub.read_text(encoding="utf-8"))
+    c["audio_path"] = ""
+    sub.write_text(json.dumps(c, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+
 def write_files(cfg, comps: list[Compound]) -> None:
     """subdraft/<nid>/{sub_draft_config.json, draft_cover.jpg} + draft_meta_info entries (type 18).
     subdraft/<nid>/draft_content.json goes through common.write_draft(subdrafts=...)."""
@@ -233,30 +271,47 @@ def write_files(cfg, comps: list[Compound]) -> None:
     common.write_meta(cfg, meta, dry=False)
 
 
-def find(draft: dict, nid: str):
-    """(container draft, track, outer segment, drafts material) of the compound whose nested draft id is nid — by
-    segment ref, never by name (CapCut renames nested drafts); also when it was later nested into another compound."""
+_FOLDER_RE = re.compile(r"subdraft[\\/]+([^\\/]+)[\\/]+sub_draft_config\.json$")
+
+
+def folder_id(dm: dict) -> str | None:
+    """subdraft/<id>/ folder of a drafts entry (from draft_config_path; pieces of a cut compound all keep the
+    original's folder), else the nested draft id."""
+    m = _FOLDER_RE.search(dm.get("draft_config_path") or "")
+    return m.group(1) if m else (dm.get("draft") or {}).get("id")
+
+
+def pieces(draft: dict, nid: str) -> list[tuple]:
+    """[(container draft, track, outer segment, drafts material)] of every piece of the compound nid, by segment
+    ref (never by name): the piece whose nested draft id is nid, plus the pieces CapCut split cut from it (fresh
+    nested id, same subdraft/<nid>/ folder) — also when nested into another compound. Sorted: exact id first, then
+    by start."""
+    out = []
+
     def walk(d, dix):
         ix = index(d.get("materials", {}))
         dix = common._drafts_ix(d, dix)
         for t in d.get("tracks", []):
             for s in t["segments"]:
-                for e in s.get("extra_material_refs") or []:
-                    if e in dix and (dix[e].get("draft") or {}).get("id") == nid:
-                        return d, t, s, dix[e]
-        for t in d.get("tracks", []):
-            for s in t["segments"]:
                 dm = next((dix[e] for e in s.get("extra_material_refs") or [] if e in dix), None)
-                if dm and isinstance(dm.get("draft"), dict) and s.get("material_id") in ix:
-                    r = walk(dm["draft"], dix)
-                    if r:
-                        return r
-        return None
+                if not dm or not isinstance(dm.get("draft"), dict):
+                    continue
+                if dm["draft"].get("id") == nid or folder_id(dm) == nid:
+                    out.append((d, t, s, dm))
+                elif s.get("material_id") in ix:
+                    walk(dm["draft"], dix)
 
-    r = walk(draft, {})
-    if r is None:
+    walk(draft, {})
+    return sorted(out, key=lambda r: (r[3]["draft"].get("id") != nid, r[2]["target_timerange"]["start"]))
+
+
+def find(draft: dict, nid: str):
+    """(container draft, track, outer segment, drafts material) of the compound nid: the piece with that nested id,
+    else the first piece cut from it (pieces())."""
+    r = pieces(draft, nid)
+    if not r:
         raise KeyError(f"compound {nid} not found on the timeline (cfg.compounds stale?)")
-    return r
+    return r[0]
 
 
 def set_duration(draft: dict, nid: str, dur: int) -> None:
@@ -269,12 +324,18 @@ def set_duration(draft: dict, nid: str, dur: int) -> None:
 
 
 def refresh(cfg, draft: dict, nid: str) -> dict | None:
-    """subdraft/<nid>/draft_content.json with the current nested draft and duration (for write_draft(subdrafts=));
-    None if the folder is absent. Durations in sub_draft_config / draft_meta_info: refresh_files()."""
-    p = cfg.project_dir / "subdraft" / nid / "draft_content.json"
-    if not p.is_file():
+    """subdraft/<folder>/draft_content.json with the current nested draft and duration (for write_draft(subdrafts=));
+    nid = a nested id of a piece or the folder id (subdrafts() gives the folder key). None if the folder is absent.
+    Durations in sub_draft_config / draft_meta_info: refresh_files()."""
+    r = pieces(draft, nid)
+    if not r:
         return None
-    nd = find(draft, nid)[3]["draft"]
+    folder = folder_id(r[0][3]) or nid
+    own = pieces(draft, folder)
+    p = cfg.project_dir / "subdraft" / folder / "draft_content.json"
+    if not p.is_file() or not own:
+        return None
+    nd = own[0][3]["draft"]
     w = json.loads(p.read_text(encoding="utf-8"))
     w["duration"] = nd["duration"]
     for t in w.get("tracks", []):
@@ -287,6 +348,20 @@ def refresh(cfg, draft: dict, nid: str) -> dict | None:
     for x in w["materials"].get("drafts", []):
         x["draft"] = copy.deepcopy(nd)
     return w
+
+
+def subdrafts(cfg, draft: dict, nids) -> dict[str, dict]:
+    """{folder id: refreshed wrapper} for the compounds touched (nested ids of pieces or folder ids) — the
+    write_draft(subdrafts=) argument; pieces of one compound map to their one folder."""
+    out = {}
+    for nid in nids:
+        r = pieces(draft, nid)
+        if not r:
+            continue
+        folder = folder_id(r[0][3]) or nid
+        if folder not in out and (w := refresh(cfg, draft, folder)) is not None:
+            out[folder] = w
+    return out
 
 
 def refresh_files(cfg, nid: str, dur: int) -> None:

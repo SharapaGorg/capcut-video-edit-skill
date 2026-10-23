@@ -9,10 +9,13 @@ Spec (the approved zoom_proposal.md), timeline seconds:
    "punchin": [{n, t}],                # F: clip scale x1.15 on the camera piece at t (from jumpcuts), no animation
    "sfx":     ["a.wav", "b.wav"]}      # optional: SFX files in cfg.sfx_dir to alternate (default: first 3 there)
 Focus: only where layout.json is S over the whole zoom, >= 2 s, >= 8 s apart, screencast at speed 1, inside ONE
-top-level segment of the screencast track (it is split at the zoom edges, CapCut-style, and the keys go on the zoom
-piece: in 350 ms, out 300 ms, effects.zoom_keyframes). SFX on every focus entry: start = zoom start, files
+top-level segment of the screencast track. The keys go on the screencast LEAF: a raw top-level segment, or the
+segment inside the screencast compound (any depth; rules.md: further cutting inside nested drafts) — that leaf is
+split at the zoom edges (CapCut-style) inside its nested draft, the outer compound stays whole (no nested draft
+copies), the subdraft folder is refreshed and an audio pre-render of the compound (if any) cleared; in 350 ms,
+out 300 ms, effects.zoom_keyframes. SFX on every focus entry: start = zoom start, files
 alternate (never the same twice in a row), level = voice − 12 LU (effects.voice_lufs over ±5 s around the zoom,
-effects.sfx_volume). cfg.sfx_dir unset -> stop and ask for it. Writes both drafts (+ subdrafts touched by push-ins)
+effects.sfx_volume). cfg.sfx_dir unset -> stop and ask for it. Writes both drafts (+ subdrafts touched by zooms)
 and stage6/zooms.json (applied zooms, for stages 7–8). A zoom that is already there (keys on the piece / an SFX at
 its start) -> refused.
 """
@@ -105,6 +108,33 @@ def camera_leaf(cfg, d: dict, t_us: int):
     return None
 
 
+def zoom_target(d: dict, track: dict, host: dict, A: int, B: int):
+    """Where the focus keys go for [A, B) (top timeline us) on the top-level segment `host` of `track`: descend
+    through compounds to the one video leaf showing that window. -> (container draft, its track, leaf, x, y in
+    container time, [drafts entries on the way]) or a str error."""
+    container, tr, seg, x, y, chain = d, track, host, A, B, []
+    dix = common._drafts_ix(d, {})
+    while True:
+        dm = next((dix[e] for e in seg.get("extra_material_refs") or [] if e in dix), None)
+        if dm is None or not isinstance(dm.get("draft"), dict):
+            if not (seg["target_timerange"]["start"] <= x and y <= seg_end(seg)):
+                return f"the screencast piece {seg['id']} does not cover the whole zoom (a cut inside the zoom)"
+            return container, tr, seg, x, y, chain
+        sp = float(seg.get("speed", 1.0))
+        src0 = (seg.get("source_timerange") or {}).get("start", 0)
+        a = seg["target_timerange"]["start"]
+        x, y = src0 + int(round((x - a) * sp)), src0 + int(round((y - a) * sp))
+        nd = dm["draft"]
+        hits = [(t, s) for t in nd.get("tracks", []) if t.get("type") == "video" for s in t.get("segments", [])
+                if s["target_timerange"]["start"] < y and seg_end(s) > x]
+        if len(hits) != 1:
+            return f"{len(hits)} video pieces inside the compound under the zoom (one is needed: move the zoom)"
+        chain.append(dm)
+        dix = common._drafts_ix(nd, dix)
+        container = nd
+        tr, seg = hits[0]
+
+
 def merge_zooms(path: Path, out: dict) -> dict:
     """zooms.json = the previous runs + this one, merged by (type, n) (a later run replaces the same n)."""
     old = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
@@ -160,8 +190,12 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
             errs.append(f"focus {z['n']}: the screencast segment also holds the camera (compound with the circle / "
                         "full-screen camera inside) — the zoom would scale the camera too; split the compound so the "
                         "screencast is alone on its track")
-        elif any(c.get("property_type") in effects.ZOOM_PROPS for c in host[0].get("common_keyframes") or []):
-            errs.append(f"focus {z['n']}: the segment already has zoom keys (applied before?)")
+        else:
+            tg = zoom_target(d, track, host[0], z["A"], z["B"])
+            if isinstance(tg, str):
+                errs.append(f"focus {z['n']}: {tg}")
+            elif any(c.get("property_type") in effects.ZOOM_PROPS for c in tg[2].get("common_keyframes") or []):
+                errs.append(f"focus {z['n']}: the segment already has zoom keys (applied before?)")
     sfx_track = next((t for t in d["tracks"] if t["type"] == "audio" and t.get("name") == SFX_TRACK), None)
     for z in focus:
         if sfx_track and any(abs(s["target_timerange"]["start"] - z["A"]) <= 1e6 / fps for s in sfx_track["segments"]):
@@ -169,11 +203,19 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
     if errs:
         raise SystemExit("зумы не применены:\n  - " + "\n  - ".join(errs))
 
-    # ---- focus: split + keys ----
+    # ---- focus: split the screencast leaf (inside its compound) + keys ----
+    touched, stale = set(), []
     for z in focus:
-        common.split_at(d, track, [z["A"], z["B"]])
-        piece = next(s for s in track["segments"] if s["target_timerange"]["start"] == z["A"])
-        D = (seg_end(piece) - z["A"]) / 1e6
+        host = next(s for s in track["segments"] if s["target_timerange"]["start"] < z["B"] and seg_end(s) > z["A"])
+        container, tr, _leaf, x, y, chain = zoom_target(d, track, host, z["A"], z["B"])
+        common.split_at(container, tr, [x, y])
+        piece = next(s for s in tr["segments"] if s["target_timerange"]["start"] == x)
+        for dm in chain:
+            touched.add(dm["draft"]["id"])
+            r = mc.stale_prerender(cfg, dm)
+            if r and r not in stale:
+                stale.append(r)
+        D = (seg_end(piece) - x) / 1e6
         base = float(((piece.get("clip") or {}).get("scale") or {}).get("x", 1.0))
         px, py = focus_pos(z["center"], z["scale"], base, cfg.width, cfg.height)
         effects.zoom_keyframes(piece, 0.0, D - OUT_S - frame, D - frame, z["scale"], cx=px, cy=py, ramp_in=IN_S)
@@ -212,7 +254,6 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
                         "voice_lufs": round(vlu, 2), "sfx_peak_lufs": lv["sfx_m_max"], "segment_id": sid}
         sfx_track["segments"] = by_start(sfx_track["segments"])
     # ---- push-in / punch-in on the full-screen camera ----
-    touched = set()
     last_push = None
     for p in sorted(pushin, key=lambda p: p["t"]):
         t = common.snap(p["t"], fps)
@@ -254,7 +295,7 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
         out["punchin"].append({"n": p["n"], "type": "punchin", "start": la / 1e6, "scale": PUNCH_SCALE,
                                "segment_id": leaf["id"], "compound": nid})
     errs += common.check_refs(d) + common.draft_overlaps(d)
-    errs += [f"keys outside the segment {s['id']}" for tr in d["tracks"] for s in tr["segments"]
+    errs += [f"keys outside the segment {sid}" for sid, s in common.all_segments(d).items()
              if not effects.keyframes_inside(s)]
     out["focus"] = [{k: v for k, v in z.items() if k not in ("A", "B")} | {"type": "focus", "start_us": z["A"],
                                                                            "end_us": z["B"], "in_ms": int(IN_S * 1000),
@@ -271,9 +312,12 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
     if dry:
         print("dry run, not written")
         return out
-    subs = {nid: w for nid in touched if (w := mc.refresh(cfg, d, nid)) is not None}
+    subs = mc.subdrafts(cfg, d, touched)
     out["backup"] = str(common.write_draft(cfg, d, "stage6-zooms", dry=False, guard_seconds=guard_seconds,
                                            subdrafts=subs))
+    for sub, ap in stale:
+        mc.clear_prerender(cfg, sub, ap)
+        print(f"  cleared audio pre-render {ap}")
     out["sfx_track_id"] = sfx_track["id"] if focus else None
     p = cfg.work_dir / "stage6" / "zooms.json"
     p.parent.mkdir(parents=True, exist_ok=True)

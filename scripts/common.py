@@ -296,6 +296,20 @@ def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -
     return sorted(out, key=lambda x: x["start"])
 
 
+def all_segments(draft: dict) -> dict:
+    """segment id -> segment for every segment of the draft and of every nested draft (any depth)."""
+    out = {}
+    stack = [draft]
+    while stack:
+        d = stack.pop()
+        for t in d.get("tracks", []):
+            for s in t.get("segments", []):
+                out.setdefault(s.get("id"), s)
+        stack += [m["draft"] for m in d.get("materials", {}).get("drafts", []) or []
+                  if isinstance(m, dict) and isinstance(m.get("draft"), dict)]
+    return out
+
+
 def has_mask(seg: dict, ix: dict) -> bool:
     """The segment really shows a mask: enable_video_mask and a common_mask material of type "mask" (CapCut ignores
     enable_video_mask without one, or with type "none" — capcut-format.md)."""
@@ -401,12 +415,15 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
 
 
 class _Cloner:
-    """Fresh copies of materials for a split piece (as CapCut split does: a compound piece gets its own copy of the
-    nested draft). Refs not in the index are kept as they are."""
+    """Fresh copies of materials for a split piece, as CapCut split does: a compound piece gets its own copy of the
+    nested draft with a FRESH nested draft id, but keeps the combination_id and the draft_*_path of the original
+    (all pieces share the original subdraft/<id>/ folder — seen on a real project: 45 drafts entries, 11 folders).
+    Refs not in the index are kept as they are. self.drafts: [(original nested id, cloned drafts entry)]."""
 
     def __init__(self, draft: dict):
         self.mats = draft["materials"]
         self.byid = index(self.mats)
+        self.drafts: list[tuple[str, dict]] = []
 
     def __call__(self, mid):
         if mid not in self.byid:
@@ -414,6 +431,10 @@ class _Cloner:
         k, m = self.byid[mid]
         c = copy.deepcopy(m)
         c["id"] = new_id()
+        if k == "drafts" and isinstance(c.get("draft"), dict):
+            old = c["draft"].get("id")
+            c["draft"]["id"] = new_id()
+            self.drafts.append((old, c))
         self.mats[k].append(c)
         self.byid[c["id"]] = (k, c)
         return c["id"]
@@ -434,7 +455,8 @@ def _retime(seg: dict, a: int, x: int, y: int, sp: float, src0) -> None:
 
 def clone_piece(draft: dict, seg: dict, x: int, y: int, clone: _Cloner | None = None) -> dict:
     """A copy of the part [x, y) (timeline us) of a top-level segment, as CapCut copy/split makes it: fresh ids, own
-    copies of the material and extras (a compound piece: own drafts entry, same nested draft), source retimed,
+    copies of the material and extras (a compound piece: own drafts entry + nested draft copy with a fresh id, same
+    subdraft folder — _Cloner), source retimed,
     target [x, y) (move it yourself). The draft gets the new materials; the segment is not added to a track."""
     clone = clone or _Cloner(draft)
     c = clone.piece(seg)

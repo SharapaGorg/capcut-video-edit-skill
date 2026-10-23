@@ -92,7 +92,7 @@ def run(cfg, file: str, ranges: list[tuple[float, float]], temp_ui: float, dry: 
     if dry or not (n_new or n_upd):
         print("dry run, not written" if dry else "nothing to write")
         return res
-    subs = {nid: w for nid in touched_nids if (w := mc.refresh(cfg, d, nid)) is not None}
+    subs = mc.subdrafts(cfg, d, touched_nids)
     common.write_draft(cfg, d, "layout-wb", dry=False, guard_seconds=guard_seconds, subdrafts=subs)
     log.setdefault("runs", []).append({"file": file, "ranges": ranges, "temp_ui": temp_ui, "value": value})
     logp.parent.mkdir(parents=True, exist_ok=True)

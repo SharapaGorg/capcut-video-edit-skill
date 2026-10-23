@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
 import sys
 import time
 from pathlib import Path
@@ -26,10 +25,9 @@ import common  # noqa: E402
 from common import by_start, seg_end  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stage2"))
 import build_maps  # noqa: E402
-
-PLACEHOLDER_RE = re.compile(r"^##_draftpath_placeholder_[^#]*_##")
-
+import make_compound as mc  # noqa: E402
 
 def load_cuts(path, fps: int) -> list[tuple[int, int]]:
     out = []
@@ -51,7 +49,7 @@ def prerenders(cfg, draft: dict, seg_ids: set) -> list[tuple[Path, str]]:
     ones too. The config is found by the drafts material's draft_config_path (CapCut gives every cut piece a new
     nested draft id, but all pieces keep pointing at the original subdraft/<id>/), else subdraft/<nested id>/."""
     dix = {m["id"]: m for m in draft["materials"].get("drafts", []) or [] if isinstance(m, dict) and "id" in m}
-    cfgs: list[Path] = []
+    found: list[dict] = []
 
     def walk(segs, dix):
         for s in segs:
@@ -60,38 +58,21 @@ def prerenders(cfg, draft: dict, seg_ids: set) -> list[tuple[Path, str]]:
                 nd = dm.get("draft")
                 if not isinstance(nd, dict):
                     continue
-                cp = dm.get("draft_config_path")
-                p = Path(project_path(cfg, cp)) if cp else \
-                    cfg.project_dir / "subdraft" / str(nd.get("id")) / "sub_draft_config.json"
-                if p not in cfgs:
-                    cfgs.append(p)
+                found.append(dm)
                 inner = {**dix, **{m["id"]: m for m in nd.get("materials", {}).get("drafts", []) or []}}
                 walk([x for t in nd.get("tracks", []) for x in t.get("segments", [])], inner)
 
     walk([s for t in draft["tracks"] for s in t["segments"] if s["id"] in seg_ids], dix)
     out = []
-    for p in cfgs:
-        if p.is_file():
-            ap = json.loads(p.read_text(encoding="utf-8")).get("audio_path") or ""
-            if ap:
-                out.append((p, ap))
+    for dm in found:
+        r = mc.stale_prerender(cfg, dm)
+        if r and r not in out:
+            out.append(r)
     return out
 
 
-def project_path(cfg, p: str) -> str:
-    """CapCut path with the draft placeholder -> real path, forward slashes."""
-    return PLACEHOLDER_RE.sub(lambda _m: cfg.project_dir.as_posix(), p.replace("\\", "/"))
-
-
-def clear_prerender(cfg, sub: Path, audio_path: str) -> None:
-    aac = Path(project_path(cfg, audio_path))
-    if not aac.is_absolute():  # CapCut writes it relative to subdraft/<id>/ (../../Resources/combination/…)
-        aac = sub.parent / aac
-    if aac.is_file():
-        aac.unlink()
-    c = json.loads(sub.read_text(encoding="utf-8"))
-    c["audio_path"] = ""
-    sub.write_text(json.dumps(c, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+project_path = mc.project_path
+clear_prerender = mc.clear_prerender
 
 
 def run(cfg, cuts: list[tuple[int, int]], dry: bool, guard_seconds: float = 5, audio_check: bool = True) -> dict:

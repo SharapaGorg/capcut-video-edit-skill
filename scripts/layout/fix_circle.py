@@ -31,7 +31,16 @@ def fix(cfg, draft: dict, keep_geometry=False, center_x=None, cache_root=None) -
     nid = (cfg.compounds or {}).get("circle")
     if not nid:
         raise SystemExit("cfg.compounds.circle is empty: run stage2/assemble.py first")
-    container, _t, outer, dm = mc.find(draft, nid)
+    log = []
+    ps = mc.pieces(draft, nid)
+    if not ps:
+        raise KeyError(f"compound {nid} not found on the timeline (cfg.compounds stale?)")
+    for container, _t, outer, dm in ps:   # a circle cut into pieces (CapCut split): every piece
+        log += _fix_piece(cfg, container, outer, dm, keep_geometry, center_x, cache_root)
+    return log
+
+
+def _fix_piece(cfg, container, outer, dm, keep_geometry, center_x, cache_root) -> list[str]:
     nd = dm["draft"]
     tpl = effects.load_template("mask_circle")
     log = []
@@ -100,8 +109,8 @@ def main(argv=None):
         print("dry run, not written")
         return
     nid = cfg.compounds["circle"]
-    w = mc.refresh(cfg, d, nid)
-    common.write_draft(cfg, d, "fix-circle", dry=False, subdrafts={nid: w} if w else None)
+    common.write_draft(cfg, d, "fix-circle", dry=False,
+                       subdrafts=mc.subdrafts(cfg, d, [p[3]["draft"]["id"] for p in mc.pieces(d, nid)]))
     print("written")
 
 

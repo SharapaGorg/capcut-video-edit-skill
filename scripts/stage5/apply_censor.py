@@ -169,7 +169,7 @@ def run(cfg, dry: bool, encode_only: bool = False, guard_seconds: float = 5) -> 
     if dry:
         print("dry run, not written")
         return mapping
-    subs = {nid: w for nid in nids if (w := mc.refresh(cfg, d, nid)) is not None}
+    subs = mc.subdrafts(cfg, d, nids)
     common.write_draft(cfg, d, "stage5-censor", dry=False, guard_seconds=guard_seconds, subdrafts=subs)
     mp = cfg.project_dir / "draft_meta_info.json"
     if mp.is_file():

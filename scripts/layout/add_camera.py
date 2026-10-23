@@ -50,6 +50,10 @@ def add(cfg, draft: dict, camera: str, pairs: list[dict], cache_root=None) -> di
     nid = (cfg.compounds or {}).get("circle")
     if not nid:
         raise SystemExit("cfg.compounds.circle is empty: run stage2/assemble.py first")
+    ps = mc.pieces(draft, nid)
+    if len(ps) > 1:
+        raise SystemExit(f"the circle compound is cut into {len(ps)} pieces (CapCut split / ripple / hook): add the "
+                         "camera inside the piece in CapCut, or before the cuts (stage 2 / LAYOUT A)")
     container, track, outer, dm = mc.find(draft, nid)
     if container is not draft:
         raise SystemExit("the circle compound is nested inside another compound: ungroup that one in CapCut first")
@@ -134,8 +138,7 @@ def main(argv=None):
         print("dry run, not written" if a.dry else "nothing to add")
         return
     nid = cfg.compounds["circle"]
-    w = mc.refresh(cfg, d, nid)
-    common.write_draft(cfg, d, "add-camera", dry=False, subdrafts={nid: w} if w else None)
+    common.write_draft(cfg, d, "add-camera", dry=False, subdrafts=mc.subdrafts(cfg, d, [nid]))
     mc.refresh_files(cfg, nid, mc.find(d, nid)[3]["draft"]["duration"])
     ap_ = cfg.work_dir / "layout" / "assembly.json"
     rep = json.loads(ap_.read_text(encoding="utf-8")) if ap_.is_file() else {}

@@ -32,7 +32,9 @@ def seg(sid, mid, start, dur, src, refs=(), volume=1.0, speed=1.0, **kw):
 def compound(nid, dm_id, leaves, mats):
     nested = {"id": nid, "name": nid[:4], "duration": max(common.seg_end(s) for s in leaves),
               "materials": mats, "tracks": [{"type": "video", "segments": []}, {"type": "video", "segments": leaves}]}
-    return {"id": dm_id, "type": "combination", "draft": nested}
+    sub = f"##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##\subdraft\{nid}"
+    return {"id": dm_id, "type": "combination", "draft": nested, "combination_id": f"CID-{nid[:4]}",
+            "draft_config_path": f"{sub}\sub_draft_config.json", "draft_file_path": f"{sub}\draft_content.json"}
 
 
 @pytest.fixture
@@ -244,11 +246,14 @@ def test_hook_copies_pieces_to_start_and_shifts_everything(make_project, tmp_pat
     assert d2["duration"] == 63 * S
     ix = common.index(d2["materials"])
     main = common.by_start(d2["tracks"][0]["segments"])
-    h = main[0]   # a piece of the screencast compound, like CapCut copy: own drafts entry, same nested draft
+    h = main[0]   # a piece of the screencast compound, like CapCut copy: own drafts entry + nested copy, fresh id,
     assert h["target_timerange"] == {"start": 0, "duration": 3 * S} and h["source_timerange"]["start"] == 10 * S
     assert h["id"] != "SCO" and "audio_effects" in {ix[e][0] for e in h["extra_material_refs"]}
     dm = next(ix[e][1] for e in h["extra_material_refs"] if ix[e][0] == "drafts")
-    assert dm["id"] != "DM2" and dm["draft"]["id"] == NID_SC
+    import make_compound as mc   # ... same combination_id and subdraft folder as the original
+    assert dm["id"] != "DM2" and dm["draft"]["id"] != NID_SC and mc.folder_id(dm) == NID_SC
+    assert dm["combination_id"] == "CID-5C5C"
+    assert len(mc.pieces(d2, NID_SC)) == 2 and mc.find(d2, NID_SC)[2]["id"] == "SCO"
     assert main[1]["id"] == "SCO" and main[1]["target_timerange"]["start"] == 3 * S
     cir = common.by_start(d2["tracks"][1]["segments"])
     assert cir[1]["id"] == "CIR" and cir[1]["target_timerange"]["start"] == 3 * S
@@ -529,3 +534,83 @@ def test_wb_fix_temperature_on_camera_pieces_of_the_file(make_project, tmp_path,
     assert res == {"new": 0, "updated": 2, "value": -0.2}
     nd = common.read_draft(cfg)["materials"]["drafts"][0]["draft"]
     assert sum(1 for m in nd["materials"]["effects"] if m["type"] == "temperature") == 1
+
+
+def test_split_gives_compound_piece_fresh_nested_id_same_folder(make_project, tmp_path):
+    """I6: CapCut split of a compound -> every piece its own nested draft copy with a fresh id; combination_id and the
+    subdraft/<id>/ folder stay the original's (real project: 45 drafts entries, 11 folders). find/pieces/subdrafts
+    resolve the pieces by segment ref + folder."""
+    import make_compound as mc
+    cfg = make_project(layout_draft(tmp_path), compounds={"circle": NID_CIRCLE, "cam_full": [], "mic": None,
+                                                          "screencast": None})
+    sd = cfg.project_dir / "subdraft" / NID_CIRCLE
+    sd.mkdir(parents=True)
+    (sd / "draft_content.json").write_text(json.dumps({"duration": 60 * S, "tracks": [], "materials": {"drafts": [
+        {"id": "W", "draft": {}}]}}), encoding="utf-8")
+    d = common.read_draft(cfg)
+    common.split_at(d, d["tracks"][1], [30 * S])
+    dms = d["materials"]["drafts"]
+    assert len(dms) == 2
+    ids = [x["draft"]["id"] for x in dms]
+    assert ids[0] == NID_CIRCLE and ids[1] != NID_CIRCLE and len(set(ids)) == 2
+    assert {mc.folder_id(x) for x in dms} == {NID_CIRCLE} and len({x["combination_id"] for x in dms}) == 1
+    ps = mc.pieces(d, NID_CIRCLE)
+    assert [p[2]["target_timerange"]["start"] for p in ps] == [0, 30 * S] and mc.find(d, NID_CIRCLE)[2]["id"] == "CIR"
+    assert mc.find(d, ids[1])[2]["target_timerange"]["start"] == 30 * S
+    # both pieces' ids map to the one existing folder; no new folder is invented
+    subs = mc.subdrafts(cfg, d, ids)
+    assert list(subs) == [NID_CIRCLE] and subs[NID_CIRCLE]["materials"]["drafts"][0]["draft"]["id"] == NID_CIRCLE
+    common.write_draft(cfg, d, "t", dry=False, guard_seconds=0, subdrafts=subs)
+    assert [p.name for p in (cfg.project_dir / "subdraft").iterdir()] == [NID_CIRCLE]
+    assert not common.check_refs(d)
+    # ripple cut through the circle: same rule
+    d = common.read_draft(cfg)
+    common.ripple(d, [(10 * S, 12 * S)])
+    assert len({x["draft"]["id"] for x in d["materials"]["drafts"]}) == 3
+    assert len(mc.pieces(d, NID_CIRCLE)) == 3
+
+
+def test_focus_zoom_keys_on_leaf_inside_screencast_compound(make_project, tmp_path):
+    """I5: the screencast is a compound -> the leaf inside is split and keyed, the outer compound stays whole: no new
+    materials.drafts entries (no nested draft copies), subdraft refreshed, audio pre-render cleared; check_zooms
+    finds the keys inside."""
+    import apply_zooms
+    import check_zooms
+    import make_compound as mc
+    cfg, spec, _v, _sr = zoom_project(make_project, tmp_path)
+    d = common.read_draft(cfg)
+    sc = d["materials"]["videos"][0]["path"]
+    nested = compound(NID_SC, "DM2", [seg("SL", "MSCn", 0, 20 * S, 0)], {"videos": [vmat("MSCn", sc)]})
+    d["materials"]["drafts"] = [nested]
+    d["materials"]["videos"].append(vmat("MCOMP", ""))
+    d["tracks"][0]["segments"] = [seg("SCO", "MCOMP", 0, 20 * S, 0, refs=["DM2"])]
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    sd = cfg.project_dir / "subdraft" / NID_SC
+    sd.mkdir(parents=True)
+    (sd / "draft_content.json").write_text(json.dumps({"duration": 20 * S, "tracks": [], "materials": {"drafts": [
+        {"id": "W", "draft": {}}]}}), encoding="utf-8")
+    aac = cfg.project_dir / "Resources" / "combination" / "x_audio.aac"
+    aac.parent.mkdir(parents=True)
+    aac.write_bytes(b"old")
+    (sd / "sub_draft_config.json").write_text(json.dumps({"audio_path": aac.as_posix()}), encoding="utf-8")
+    n_drafts = len(d["materials"]["drafts"])
+    spec2 = {"focus": spec["focus"] + [dict(spec["focus"][0], n=2, start=17.0, end=19.5)]}
+    apply_zooms.run(cfg, spec2, dry=False, guard_seconds=0)
+    d2 = common.read_draft(cfg)
+    assert len(d2["materials"]["drafts"]) == n_drafts            # zooms do not copy the nested draft
+    assert [s["id"] for s in d2["tracks"][0]["segments"]] == ["SCO"] and not d2["tracks"][0]["segments"][0].get(
+        "common_keyframes")
+    inner = common.by_start(d2["materials"]["drafts"][0]["draft"]["tracks"][-1]["segments"])
+    assert [(s["target_timerange"]["start"], common.seg_end(s)) for s in inner] == [
+        (0, 5 * S), (5 * S, 9 * S), (9 * S, 17 * S), (17 * S, 19_500_000), (19_500_000, 20 * S)]
+    assert [bool(s.get("common_keyframes")) for s in inner] == [False, True, False, True, False]
+    assert all(effects.keyframes_inside(s) for s in inner)
+    w = json.loads((sd / "draft_content.json").read_text(encoding="utf-8"))
+    assert len(w["materials"]["drafts"][0]["draft"]["tracks"][-1]["segments"]) == 5
+    assert not aac.exists() and json.loads((sd / "sub_draft_config.json").read_text())["audio_path"] == ""
+    assert len(mc.pieces(d2, NID_SC)) == 1
+    reps = check_zooms.run(cfg, frames=False)
+    assert [r["problems"] for r in reps] == [[], []]
+    with pytest.raises(SystemExit):        # applied twice -> refused (keys on the leaf)
+        apply_zooms.run(cfg, spec, dry=True)
