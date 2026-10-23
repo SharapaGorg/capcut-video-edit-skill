@@ -28,7 +28,6 @@ PATS = {
     "password": re.compile(r"(?i)(пароль|password|passwd)"),
     "urltoken": re.compile(r"(?i)[?&](token|key|api_key|apikey|access_token|auth)=\S+"),
 }
-SECRET = ("email", "key", "urltoken", "password")   # verify_censor: these must be gone after the blur
 NAME_RE = re.compile(r"(.+?)_(\d+)(\.psm11)?\.tsv$")
 
 

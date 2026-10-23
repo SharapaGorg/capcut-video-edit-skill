@@ -199,9 +199,33 @@ def test_candidates_filter_screen_words():
 
 
 # ---------- stage 4: hook ----------
+def write_words(cfg, ws):
+    p = cfg.work_dir / "stage3" / "transcript_timeline.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"segments": [{"id": 1, "words": ws}]}, ensure_ascii=False), encoding="utf-8")
+
+
+def hook_draft(tmp_path, ending_f=True):
+    """layout_draft; with ending_f the circle ends at 40 s and the full-screen camera covers 40–60 s (end screen)."""
+    d = layout_draft(tmp_path)
+    if ending_f:
+        cir = d["tracks"][1]["segments"][0]
+        cir["target_timerange"]["duration"] = cir["source_timerange"]["duration"] = 40 * S
+        nd = d["materials"]["drafts"][0]["draft"]
+        nd["duration"] = 40 * S
+        leaf = nd["tracks"][1]["segments"][0]
+        leaf["target_timerange"]["duration"] = leaf["source_timerange"]["duration"] = 40 * S
+        f1 = d["tracks"][2]["segments"][0]
+        f1["target_timerange"] = {"start": 40 * S, "duration": 20 * S}
+        f1["source_timerange"] = {"start": 45 * S, "duration": 20 * S}
+    else:
+        d["tracks"][2]["segments"] = []
+    return d
+
+
 def test_hook_copies_pieces_to_start_and_shifts_everything(make_project, tmp_path):
     import apply_hook
-    d = layout_draft(tmp_path)
+    d = hook_draft(tmp_path)
     sc = d["materials"]["videos"][0]["path"]
     # main track = screencast compound (leaf src = timeline + 100 s) with voice effects on the outer segment
     sc_leaf = seg("SL", "MSCn", 0, 60 * S, 100 * S)
@@ -209,9 +233,10 @@ def test_hook_copies_pieces_to_start_and_shifts_everything(make_project, tmp_pat
     d["materials"]["audio_effects"] = [{"id": "VC", "type": "audio_effect", "name": "Voice Crisper"}]
     d["materials"]["videos"].append(vmat("MCOMP2", ""))
     d["tracks"][0]["segments"] = [seg("SCO", "MCOMP2", 0, 60 * S, 0, refs=["DM2", "VC"])]
-    d["tracks"][2]["segments"] = []
     cfg = make_project(d, compounds={"circle": NID_CIRCLE, "screencast": NID_SC, "cam_full": [], "mic": None},
-                       layout=[{"start": 0.0, "end": 60.0, "layout": "S"}])
+                       layout=[{"start": 0.0, "end": 40.0, "layout": "S"}, {"start": 40.0, "end": 60.0, "layout": "F"}])
+    common.write_layout(cfg, common.read_layout(cfg), f_segments=[{"timeline_us": [40 * S, 60 * S], "file": "c1.mp4"}])
+    write_words(cfg, words(("Смотрите", 10.2, 10.6), ("результат", 10.7, 11.3), ("дальше", 14.0, 14.5)))
     nested_before = [json.dumps(x["draft"], sort_keys=True) for x in d["materials"]["drafts"]]
     res = apply_hook.run(cfg, [(10.0, 13.0)], dry=False, guard_seconds=0, maps=False)
     assert res["hook_len_us"] == 3 * S
@@ -235,10 +260,43 @@ def test_hook_copies_pieces_to_start_and_shifts_everything(make_project, tmp_pat
     assert [json.dumps(x["draft"], sort_keys=True) for x in d2["materials"]["drafts"]][:2] == nested_before
     assert not common.check_refs(d2)
     rows = common.read_layout(cfg)
-    assert [(r["start"], r["end"], r["layout"]) for r in rows] == [(0.0, 3.0, "S"), (3.0, 63.0, "S")]
+    assert [(r["start"], r["end"], r["layout"]) for r in rows] == [(0.0, 3.0, "S"), (3.0, 43.0, "S"), (43.0, 63.0, "F")]
+    lj = json.loads((cfg.work_dir / "layout" / "layout.json").read_text(encoding="utf-8"))
+    assert lj["f_segments"][0]["timeline_us"] == [43 * S, 63 * S]
     log = json.loads((cfg.work_dir / "stage4" / "hook_applied.json").read_text(encoding="utf-8"))
     assert log["shift_us"] == 3 * S and log["pieces_us"] == [[10 * S, 13 * S]]
     assert json.loads((cfg.project_dir / "draft_meta_info.json").read_text())["tm_duration"] == 63 * S
+
+
+def test_hook_refusals(make_project, tmp_path):
+    """STAGE_4 checks are failures, not notes: hook > 30 s, first word > 0.5 s, ending without full-screen camera."""
+    import apply_hook
+    cfg = make_project(hook_draft(tmp_path))
+    with pytest.raises(SystemExit, match="transcript_timeline"):
+        apply_hook.run(cfg, [(10.0, 13.0)], dry=True)
+    write_words(cfg, words(("раз", 1.0, 1.4), ("два", 11.0, 11.4)))
+    with pytest.raises(SystemExit, match="> 30 s"):
+        apply_hook.run(cfg, [(0.5, 32.0)], dry=True)
+    with pytest.raises(SystemExit, match="first word"):
+        apply_hook.run(cfg, [(10.0, 13.0)], dry=True)          # first word 1.0 s into the hook
+    assert apply_hook.run(cfg, [(10.6, 13.0)], dry=True)["hook_len_us"] == int(2.4 * S)
+    cfg2 = make_project(hook_draft(tmp_path, ending_f=False))   # the circle runs to the end
+    write_words(cfg2, words(("раз", 10.2, 10.6)))
+    with pytest.raises(SystemExit) as e:
+        apply_hook.run(cfg2, [(10.0, 13.0)], dry=True)
+    assert e.value.code == 1
+
+
+def test_layout_cut_and_insert():
+    obj = {"layout": [{"start": 0.0, "end": 5.0, "layout": "S"}, {"start": 5.0, "end": 8.0, "layout": "F"},
+                      {"start": 8.0, "end": 10.0, "layout": "S"}],
+           "f_segments": [{"timeline_us": [5 * S, 8 * S]}]}
+    cut = common.layout_cut(obj, [(2 * S, 3 * S), (8 * S, 10 * S)])
+    assert [(r["start"], r["end"], r["layout"]) for r in cut["layout"]] == [(0.0, 4.0, "S"), (4.0, 7.0, "F")]
+    assert cut["f_segments"] == [{"timeline_us": [4 * S, 7 * S]}]
+    ins = common.layout_insert(obj, [(6 * S, 9 * S)], 3 * S)
+    assert [(r["start"], r["end"], r["layout"]) for r in ins["layout"][:2]] == [(0.0, 2.0, "F"), (2.0, 3.0, "S")]
+    assert ins["layout"][2]["start"] == 3.0 and ins["f_segments"] == [{"timeline_us": [8 * S, 11 * S]}]
 
 
 # ---------- stage 6: zooms + SFX level ----------
@@ -302,6 +360,32 @@ def test_zoom_sfx_level(make_project, tmp_path):
     import check_zooms
     (rep,) = check_zooms.run(cfg, frames=False)
     assert rep["problems"] == [] and abs(rep["sfx_level_lu"] - (-12)) <= 1.0
+    # a later run with another zoom: zooms.json keeps both (merged by type and n)
+    spec2 = {"focus": [dict(spec["focus"][0], n=2, start=17.0, end=19.5)]}
+    apply_zooms.run(cfg, spec2, dry=False, guard_seconds=0)
+    zj = json.loads((cfg.work_dir / "stage6" / "zooms.json").read_text(encoding="utf-8"))
+    assert [z["n"] for z in zj["focus"]] == [1, 2]
+
+
+def test_focus_zoom_refuses_segment_holding_the_camera(make_project, tmp_path):
+    """A screencast compound that also holds the circle: zooming it would scale the camera too."""
+    import apply_zooms
+    cfg, spec, _v, _sr = zoom_project(make_project, tmp_path)
+    d = common.read_draft(cfg)
+    sc = d["materials"]["videos"][0]["path"]
+    cam = (tmp_path / "src" / "camera" / "c1.mp4").as_posix()
+    leaves = [seg("SL", "MSCn", 0, 20 * S, 0)]
+    nested = compound(NID_SC, "DM2", leaves, {"videos": [vmat("MSCn", sc), vmat("MCn", cam)],
+                                               "common_mask": [{"id": "MASK", "type": "mask", "path": "x"}]})
+    nested["draft"]["tracks"].append({"type": "video", "segments": [
+        seg("CL", "MCn", 0, 20 * S, 3 * S, refs=["MASK"], volume=0.0, enable_video_mask=True)]})
+    d["materials"]["drafts"] = [nested]
+    d["materials"]["videos"].append(vmat("MCOMP", ""))
+    d["tracks"][0]["segments"] = [seg("SCO", "MCOMP", 0, 20 * S, 0, refs=["DM2"])]
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SystemExit, match="camera"):
+        apply_zooms.run(cfg, spec, dry=True)
 
 
 def test_zooms_need_sfx_dir(make_project, tmp_path):
@@ -370,6 +454,26 @@ def test_censor_burns_blur_and_swaps_path(make_project, tmp_path):
     inside = np.abs(x[60:80, 100:180] - y[60:80, 100:180]).mean()
     outside = np.abs(x[:40, :80] - y[:40, :80]).mean()
     assert outside < 3 and inside > outside
+
+
+def test_verify_checks_every_hidden_type_on_the_finding_frames():
+    import verify_censor
+    assert {"email", "key", "password", "urltoken", "card"} <= verify_censor.SECRET
+    assert verify_censor.ocr_seconds({"src_start": 3.0, "src_end": 6.0, "boxes": None}) == [3.0, 4.0, 5.0]
+    assert verify_censor.ocr_seconds({"src_start": 3, "src_end": 5, "boxes": [{"t": 3.0, "bbox": [0, 0, 1, 1]},
+                                                                             {"t": 4.0, "bbox": [0, 0, 1, 1]}]}) == [3.0, 4.0]
+
+
+def test_extract_frames_fails_on_broken_source(make_project, tmp_path):
+    import extract_frames
+    bad = tmp_path / "src" / "screencasts" / "broken.mp4"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"not a video")
+    d = {"id": TID, "duration": 3 * S, "materials": {"videos": [vmat("MSC", bad.as_posix())]},
+         "tracks": [{"type": "video", "name": "", "segments": [seg("SC", "MSC", 0, 3 * S, 0)]}]}
+    cfg = make_project(d)
+    with pytest.raises(SystemExit, match="ffmpeg failed"):
+        extract_frames.run(cfg)
 
 
 def test_censor_nothing_found(make_project, tmp_path):

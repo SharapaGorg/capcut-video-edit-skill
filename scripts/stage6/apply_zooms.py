@@ -79,6 +79,14 @@ def screencast_track(cfg, d: dict) -> dict:
     return d["tracks"][c.most_common(1)[0][0]]
 
 
+def cams_on_track(cfg, d: dict, track: dict, host: dict) -> bool:
+    """Camera leaves under the top-level segment `host` (inside its compound) — a zoom on it would scale them too."""
+    ti = d["tracks"].index(track)
+    a, b = host["target_timerange"]["start"], seg_end(host)
+    return any(p["track"] == ti and p["start"] < b and p["end"] > a and p["compound"]
+               for p in common.flatten(cfg, d, ("camera",)))
+
+
 def camera_leaf(cfg, d: dict, t_us: int):
     """(segment, its start on the timeline, nested draft id | None) of the full-screen camera piece at t_us:
     a raw top-level camera segment or a leaf inside a compound (speed 1)."""
@@ -107,6 +115,19 @@ def camera_leaf(cfg, d: dict, t_us: int):
                             and source_role(cfg, jx[ns["material_id"]][1].get("path", "")) == "camera":
                         return ns, na, nd["id"]
     return None
+
+
+def merge_zooms(path: Path, out: dict) -> dict:
+    """zooms.json = the previous runs + this one, merged by (type, n) (a later run replaces the same n)."""
+    old = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    res = dict(old, **{k: v for k, v in out.items() if k not in ("focus", "pushin", "punchin")})
+    for k in ("focus", "pushin", "punchin"):
+        by = {z["n"]: z for z in old.get(k, [])}
+        by.update({z["n"]: z for z in out.get(k, [])})
+        res[k] = sorted(by.values(), key=lambda z: z["start"])
+    if out.get("sfx_track_id") is None and old.get("sfx_track_id"):
+        res["sfx_track_id"] = old["sfx_track_id"]
+    return res
 
 
 def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
@@ -147,6 +168,10 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
         host = [s for s in track["segments"] if s["target_timerange"]["start"] < z["B"] and seg_end(s) > z["A"]]
         if len(host) != 1:
             errs.append(f"focus {z['n']}: crosses {len(host)} segments of the screencast track (one is needed)")
+        elif cams_on_track(cfg, d, track, host[0]):
+            errs.append(f"focus {z['n']}: the screencast segment also holds the camera (compound with the circle / "
+                        "full-screen camera inside) — the zoom would scale the camera too; split the compound so the "
+                        "screencast is alone on its track")
         elif any(c.get("property_type") in effects.ZOOM_PROPS for c in host[0].get("common_keyframes") or []):
             errs.append(f"focus {z['n']}: the segment already has zoom keys (applied before?)")
     sfx_track = next((t for t in d["tracks"] if t["type"] == "audio" and t.get("name") == SFX_TRACK), None)
@@ -242,12 +267,9 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
             touched.add(nid)
         out["punchin"].append({"n": p["n"], "type": "punchin", "start": la / 1e6, "scale": PUNCH_SCALE,
                                "segment_id": leaf["id"], "compound": nid})
-    errs += common.check_refs(d)
-    for tr in d["tracks"]:
-        ss = by_start(tr["segments"])
-        errs += [f"overlap on {tr.get('name') or tr['type']} at {seg_end(a) / 1e6:.3f}" for a, b in zip(ss, ss[1:])
-                 if seg_end(a) > b["target_timerange"]["start"] + 1]
-        errs += [f"keys outside the segment {s['id']}" for s in ss if not effects.keyframes_inside(s)]
+    errs += common.check_refs(d) + common.draft_overlaps(d)
+    errs += [f"keys outside the segment {s['id']}" for tr in d["tracks"] for s in tr["segments"]
+             if not effects.keyframes_inside(s)]
     out["focus"] = [{k: v for k, v in z.items() if k not in ("A", "B")} | {"type": "focus", "start_us": z["A"],
                                                                            "end_us": z["B"], "in_ms": int(IN_S * 1000),
                                                                            "out_ms": int(OUT_S * 1000)} for z in focus]
@@ -269,7 +291,7 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
     out["sfx_track_id"] = sfx_track["id"] if focus else None
     p = cfg.work_dir / "stage6" / "zooms.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    p.write_text(json.dumps(merge_zooms(p, out), ensure_ascii=False, indent=1), encoding="utf-8")
     print("written:", p)
     return out
 

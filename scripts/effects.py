@@ -148,7 +148,7 @@ def zoom_keyframes(seg: dict, t_in: float, t_hold: float | None, t_out: float | 
     cx/cy: clip.transform x/y at full zoom (1.0 = half the canvas, y up); Position keys go from the clip's current
     transform to cx/cy and back, only when cx or cy is given.
     CapCut format (checked on real projects): time_offset = SOURCE time of the key (source_timerange.start +
-    offset x speed); uniform scale -> only KFTypeScaleX. Replaces existing Scale/Position keys.
+    offset x speed); uniform scale (clip uniform_scale.on; x == y if the flag is absent) -> only KFTypeScaleX. Replaces existing Scale/Position keys.
     ValueError if the keys are not increasing or fall outside the segment."""
     dur = seg["target_timerange"]["duration"]
     push = t_hold is None and t_out is None
@@ -181,7 +181,9 @@ def zoom_keyframes(seg: dict, t_in: float, t_hold: float | None, t_out: float | 
         return [base, top] if push else [base, top, top, base]
 
     props = {"KFTypeScaleX": shape(bx, bx * scale)}
-    if abs(bx - by) > 1e-9 and not (seg.get("uniform_scale") or {}).get("on"):
+    us_flag = (seg.get("uniform_scale") or {}).get("on")
+    uniform = us_flag if us_flag is not None else abs(bx - by) <= 1e-9   # the clip's flag; x == y only without it
+    if not uniform:
         props["KFTypeScaleY"] = shape(by, by * scale)
     if cx is not None or cy is not None:
         props["KFTypePositionX"] = shape(tx, tx if cx is None else cx)

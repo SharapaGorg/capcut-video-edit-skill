@@ -190,6 +190,24 @@ def test_ripple_cut_splits_and_clears_audio_prerender(project, tmp_path):
     assert log[-1]["cuts"] == [[2.0, 3.0]] and log[-1]["after"] == 9.0
 
 
+def test_ripple_cut_maps_layout_json(project, tmp_path):
+    """A cut before an F row shifts the row (and f_segments) left by the cut length."""
+    import ripple_cut
+    sc = src_dir(tmp_path, "screencasts", ["s1.mp4"])
+    path = (sc / "s1.mp4").as_posix()
+    raw = draft([("video", [seg("R1", "MR", 0, 10 * S, 0)])], videos=[vmat("MR", path)])
+    cur = draft([("video", [seg("C1", "MC", 0, 10 * S, 0)])], videos=[vmat("MC", path)])
+    cfg = project({"camera": None, "screencasts": str(sc), "voice": None}, cur, raw, words_at((1.0, 1.4), (6.0, 6.4)))
+    common.write_layout(cfg, [{"start": 0.0, "end": 5.0, "layout": "S"}, {"start": 5.0, "end": 8.0, "layout": "F"},
+                              {"start": 8.0, "end": 10.0, "layout": "S"}],
+                        f_segments=[{"timeline_us": [5 * S, 8 * S], "file": "c.mp4"}])
+    ripple_cut.run(cfg, [(2 * S, 3 * S)], dry=False, guard_seconds=0, audio_check=False)
+    lj = json.loads((cfg.work_dir / "layout" / "layout.json").read_text(encoding="utf-8"))
+    assert [(r["start"], r["end"], r["layout"]) for r in lj["layout"]] == [(0.0, 4.0, "S"), (4.0, 7.0, "F"),
+                                                                            (7.0, 9.0, "S")]
+    assert lj["f_segments"][0]["timeline_us"] == [4 * S, 7 * S]
+
+
 def test_ripple_cut_dry_writes_nothing(project, tmp_path):
     import ripple_cut
     sc = src_dir(tmp_path, "screencasts", ["s1.mp4"])

@@ -146,11 +146,7 @@ def run(cfg, ranges_s: list[tuple], dry: bool, guard_seconds: float = 5) -> list
         raise SystemExit("F не применён:\n  - " + "\n  - ".join(errs))
     old_f = common.f_ranges(cfg, d)
     log = apply(cfg, d, ranges)
-    errs = common.check_refs(d)
-    for t in d["tracks"]:
-        segs = by_start(t["segments"])
-        errs += [f"overlap on {t.get('name') or t['type']} at {seg_end(p) / 1e6:.3f}" for p, q in zip(segs, segs[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+    errs = common.check_refs(d) + common.draft_overlaps(d)
     rows = common.layout_rows(old_f + ranges, dur, common.read_layout(cfg))
     for r in log:
         print(f"  F {r['timeline_us'][0] / 1e6:.3f}–{r['timeline_us'][1] / 1e6:.3f} <- {r['file']} "

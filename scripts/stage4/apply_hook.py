@@ -11,7 +11,8 @@ piece, as CapCut copy/split does (common.clone_piece: own material + extras — 
 a compound piece keeps pointing at the same nested draft, like a compound CapCut cut into pieces). The originals stay
 where they were, shifted by the hook length together with everything else (nested drafts untouched). Then: draft_meta_info tm_duration, stage4/hook_applied.json, layout.json
 shifted with the hook rows in front, and STAGE_3 steps 1–4 (build_maps.run) — unless --no-maps.
-Ending check (STAGE_4): the last 20 s should be F in layout.json — printed as a note.
+Refused (nothing written): hook > 30 s; first word later than 0.5 s from the start; no transcript_timeline;
+after the insert the last 20 s not full-screen camera or with overlays (STAGE_4 ending: end screen).
 A second run is refused (stage4/hook_applied.json exists) unless --force.
 """
 from __future__ import annotations
@@ -29,6 +30,7 @@ from common import by_start, seg_end  # noqa: E402
 
 END_S = 20.0
 HOOK_MAX = 30.0
+FIRST_WORD_MAX = 0.5
 
 
 def load(path) -> tuple[str | None, list[tuple]]:
@@ -62,11 +64,7 @@ def build(cfg, d: dict, pieces: list[tuple[int, int]]) -> tuple[list[tuple], int
 
 
 def validate(cfg, d: dict, orig: dict, new: list, L: int) -> list[str]:
-    errs = common.check_refs(d)
-    for t in d["tracks"]:
-        ss = by_start(t["segments"])
-        errs += [f"overlap on {t.get('name') or t['type']} at {seg_end(p) / 1e6:.3f}" for p, q in zip(ss, ss[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+    errs = common.check_refs(d) + common.draft_overlaps(d)
     main = by_start(d["tracks"][0]["segments"]) if d["tracks"] else []
     if main and main[0]["target_timerange"]["start"] != 0:
         errs.append("main track does not start at 0")
@@ -91,24 +89,32 @@ def validate(cfg, d: dict, orig: dict, new: list, L: int) -> list[str]:
     return errs
 
 
-def shift_layout(rows: list[dict], pieces: list[tuple[int, int]], L: int) -> list[dict]:
-    """Hook rows (layout of the copied parts) in front, the old rows shifted by L (seconds)."""
-    out, off = [], 0
+def first_word_s(words: list[dict], pieces: list[tuple[int, int]]) -> float | None:
+    """Hook time (s) of the first word inside the hook pieces; None if the hook has no speech."""
+    off = 0
     for a, b in pieces:
-        for r in rows:
-            x, y = max(r["start"] * 1e6, a), min(r["end"] * 1e6, b)
-            if y > x:
-                out.append({"start": round((off + x - a) / 1e6, 6), "end": round((off + y - a) / 1e6, 6),
-                            "layout": r["layout"], "note": f"хук (этап 4): копия {a / 1e6:.3f}–{b / 1e6:.3f}"})
-        if not any(r["start"] * 1e6 < b and r["end"] * 1e6 > a for r in rows):
-            out.append({"start": round(off / 1e6, 6), "end": round((off + b - a) / 1e6, 6), "layout": "S",
-                        "note": f"хук (этап 4): копия {a / 1e6:.3f}–{b / 1e6:.3f}"})
+        ws = [w for w in words if a / 1e6 - 1e-6 <= w["start"] and w["end"] <= b / 1e6 + 1e-6]
+        if ws:
+            return round((off + common.us(ws[0]["start"]) - a) / 1e6, 3)
         off += b - a
-    sh = L / 1e6
-    for r in rows:
-        r = dict(r, start=round(r["start"] + sh, 6), end=round(r["end"] + sh, 6))
-        out.append(r)
-    return out
+    return None
+
+
+def ending_errors(cfg, d: dict) -> list[str]:
+    """STAGE_4 ending: the last END_S seconds = camera on full screen, no overlays (circle, graphics, texts,
+    stickers, effects — leaves without a source role, except audio and Adjustment)."""
+    b = d["duration"]
+    a = max(0, b - common.us(END_S))
+    tol = int(1e6 / cfg.fps)
+    errs = [f"ending: no full-screen camera at {x / 1e6:.3f}–{y / 1e6:.3f}"
+            for x, y in common.subtract_ranges(a, b, common.full_camera_ranges(cfg, d)) if y - x > tol]
+    over = sorted({(p["name"] or p["kind"] or "?") for p in common.flatten(cfg, d, None)
+                   if p["start"] < b - tol and p["end"] > a + tol
+                   and ((p["role"] is None and p["kind"] not in ("audios", "placeholders"))
+                        or (p["role"] == "camera" and p["mask"]))})
+    if over:
+        errs.append(f"ending: overlays in the last {END_S:.0f} s: {', '.join(over)[:200]}")
+    return errs
 
 
 def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: bool = True,
@@ -129,10 +135,18 @@ def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: b
             w = common.inside_word(words, t / 1e6, tol=0.01)
             if w:
                 errs.append(f"edge {t / 1e6:.3f} inside the word «{w['word']}» {w['start']}–{w['end']}")
+    if not words:
+        errs.append("нет stage3/transcript_timeline.json: границы и первое слово не проверить (этап 3)")
+    L = sum(b - a for a, b in pieces)
+    if L / 1e6 > HOOK_MAX:
+        errs.append(f"hook {L / 1e6:.2f} s > {HOOK_MAX:.0f} s")
+    fw = first_word_s(words, pieces)
+    if words and (fw is None or fw > FIRST_WORD_MAX):
+        errs.append(f"first word of the hook at {fw} s (needs ≤ {FIRST_WORD_MAX} s from the start)")
     if errs:
         raise SystemExit("хук не применён:\n  - " + "\n  - ".join(errs))
     new, L = build(cfg, d, pieces)
-    errs = validate(cfg, d, orig, new, L)
+    errs = validate(cfg, d, orig, new, L) + ending_errors(cfg, d)
     text = " ".join(w["word"] for a, b in pieces for w in words if a / 1e6 - 1e-6 <= w["start"] and w["end"] <= b / 1e6 + 1e-6)
     ix = common.index(d["materials"])
     segs = [{"track": d["tracks"][ti].get("name") or f"{d['tracks'][ti]['type']}#{ti}", "segment_id": n["id"],
@@ -143,14 +157,7 @@ def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: b
     for s in segs:
         print(f"  hook {s['track']}: {s['timeline_us'][0] / 1e6:.3f}–{s['timeline_us'][1] / 1e6:.3f} <- "
               f"{Path(s['file']).name} {s['source_us'][0] / 1e6 if s['source_us'] else '-'}")
-    print(f"hook {L / 1e6:.3f} s: {text}")
-    if L / 1e6 > HOOK_MAX:
-        print(f"  note: hook {L / 1e6:.1f} s > {HOOK_MAX:.0f} s (STAGE_4: ≤ 30 s to the promise and the result)")
-    rows = common.read_layout(cfg)
-    new_rows = shift_layout(rows, pieces, L) if rows else []
-    end0 = d["duration"] / 1e6 - END_S
-    if new_rows and common.layout_of(new_rows, end0, d["duration"] / 1e6) != {"F"}:
-        print(f"  note: the last {END_S:.0f} s are not all F (end screen needs camera on full screen, no overlays)")
+    print(f"hook {L / 1e6:.3f} s, first word at {fw} s: {text}")
     print(f"duration {dur0 / 1e6:.3f} -> {d['duration'] / 1e6:.3f}")
     print("VALIDATION:", "OK" if not errs else "FAIL")
     for e in errs:
@@ -168,8 +175,8 @@ def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: b
     common.write_meta(cfg, meta, dry=False)
     logp.parent.mkdir(parents=True, exist_ok=True)
     logp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-    if rows:
-        common.write_layout(cfg, new_rows, stage4_hook={"shift_us": L, "log": str(logp)})
+    common.update_layout(cfg, lambda o: dict(common.layout_insert(o, pieces, L),
+                                             stage4_hook={"shift_us": L, "log": str(logp)}))
     print("written:", logp)
     if maps:
         import build_maps

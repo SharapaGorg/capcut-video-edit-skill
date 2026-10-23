@@ -578,6 +578,58 @@ def write_layout(cfg: Config, rows: list[dict], **extra) -> Path:
     return p
 
 
+def update_layout(cfg: Config, fn) -> bool:
+    """Apply fn(obj) -> obj to layout/layout.json in place; False if there is no layout.json."""
+    p = cfg.work_dir / "layout" / "layout.json"
+    if not p.is_file():
+        return False
+    obj = fn(json.loads(p.read_text(encoding="utf-8")))
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    return True
+
+
+def layout_cut(obj: dict, cuts: list[tuple[int, int]]) -> dict:
+    """layout.json content after a ripple cut of [a, b) us ranges: rows and f_segments mapped through the cuts
+    (common.map_through_cuts), rows that vanish are dropped. Counterpart of layout_insert."""
+    rows = []
+    for r in obj.get("layout", []):
+        a, b = map_through_cuts(us(r["start"]), cuts), map_through_cuts(us(r["end"]), cuts)
+        if b > a:
+            rows.append(dict(r, start=round(a / 1e6, 6), end=round(b / 1e6, 6)))
+    segs = []
+    for f in obj.get("f_segments", []):
+        a, b = (map_through_cuts(x, cuts) for x in f["timeline_us"])
+        if b > a:
+            segs.append(dict(f, timeline_us=[a, b]))
+    out = dict(obj, layout=rows)
+    if "f_segments" in obj:
+        out["f_segments"] = segs
+    return out
+
+
+def layout_insert(obj: dict, pieces: list[tuple[int, int]], L: int, note: str = "хук (этап 4)") -> dict:
+    """layout.json content after copies of the timeline pieces [(a, b)] us (total L) were put at the start (stage 4):
+    rows for the copies in front (the layout of the copied parts; S where nothing was), everything else + L,
+    f_segments + L."""
+    rows = obj.get("layout", [])
+    out, off = [], 0
+    for a, b in pieces:
+        tag = f"{note}: копия {a / 1e6:.3f}–{b / 1e6:.3f}"
+        for r in rows:
+            x, y = max(us(r["start"]), a), min(us(r["end"]), b)
+            if y > x:
+                out.append({"start": round((off + x - a) / 1e6, 6), "end": round((off + y - a) / 1e6, 6),
+                            "layout": r["layout"], "note": tag})
+        if not any(us(r["start"]) < b and us(r["end"]) > a for r in rows):
+            out.append({"start": round(off / 1e6, 6), "end": round((off + b - a) / 1e6, 6), "layout": "S", "note": tag})
+        off += b - a
+    out += [dict(r, start=round(r["start"] + L / 1e6, 6), end=round(r["end"] + L / 1e6, 6)) for r in rows]
+    res = dict(obj, layout=out)
+    if "f_segments" in obj:
+        res["f_segments"] = [dict(f, timeline_us=[x + L for x in f["timeline_us"]]) for f in obj["f_segments"]]
+    return res
+
+
 def layout_of(rows: list[dict], a: float, b: float) -> set:
     """Layouts ('S'/'F') that the rows give over [a, b) seconds; an uncovered part counts as 'S'."""
     hit = {r["layout"] for r in rows if r["start"] < b and r["end"] > a}
@@ -681,6 +733,19 @@ def grab_frame(path: str, t: float, out: Path) -> Path:
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{max(t, 0):.3f}", "-i", path,
                         "-frames:v", "1", "-q:v", "2", str(out)], check=True)
     return out
+
+
+def overlap_errors(track: dict, label: str | None = None) -> list[str]:
+    """Segments of one track that overlap (> 1 us), as validation messages."""
+    name = label or track.get("name") or track["type"]
+    ss = by_start(track["segments"])
+    return [f"overlap on {name} at {seg_end(p) / 1e6:.3f}" for p, q in zip(ss, ss[1:])
+            if seg_end(p) > q["target_timerange"]["start"] + 1]
+
+
+def draft_overlaps(draft: dict) -> list[str]:
+    """overlap_errors over every top-level track."""
+    return [e for i, t in enumerate(draft["tracks"]) for e in overlap_errors(t, t.get("name") or f"{t['type']}#{i}")]
 
 
 def gap_count(track) -> int:

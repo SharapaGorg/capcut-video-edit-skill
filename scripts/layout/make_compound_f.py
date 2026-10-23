@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stage2"))
 import common  # noqa: E402
 import effects  # noqa: E402
 import make_compound as mc  # noqa: E402
-from common import by_start, index, seg_end, source_role  # noqa: E402
+from common import index, seg_end, source_role  # noqa: E402
 
 NAME = "Камера F"
 
@@ -81,11 +81,7 @@ def run(cfg, dry: bool, cache_root=None, guard_seconds: float = 5) -> dict:
             print(f"  Adjustment extended to {a / 1e6:.3f}–{b / 1e6:.3f}")
         else:
             effects.adjustment_segment(d, at, x, y - x, cache_root=cache_root)
-    errs = mc.errors(d, made)
-    for t in d["tracks"]:
-        ss = by_start(t["segments"])
-        errs += [f"overlap on {t.get('name') or t['type']} at {seg_end(p) / 1e6:.3f}" for p, q in zip(ss, ss[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+    errs = mc.errors(d, made) + common.draft_overlaps(d)
     full = common.full_camera_ranges(cfg, d)
     for t in d["tracks"]:
         if t["type"] != "adjust":

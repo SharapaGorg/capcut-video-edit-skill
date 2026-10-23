@@ -112,8 +112,7 @@ def run(cfg, cuts: list[tuple[int, int]], dry: bool, guard_seconds: float = 5, a
         removed = sum(1 for r in rec if r["track"] == ti and r["removed"])
         print(f"  {name}: removed {removed}, trimmed/split pieces {sum(1 for s in segs if s['id'] in touched)}, "
               f"now {len(segs)}")
-        errs += [f"overlap on {name} at {q['target_timerange']['start'] / 1e6:.3f}" for p, q in zip(segs, segs[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+        errs += common.overlap_errors(t, name)
         if common.gap_count(t) > gaps0[ti]:
             errs.append(f"{name}: new holes ({gaps0[ti]} -> {common.gap_count(t)})")
         for s in segs:
@@ -155,6 +154,8 @@ def run(cfg, cuts: list[tuple[int, int]], dry: bool, guard_seconds: float = 5, a
     prev.append({"stamp": time.strftime("%Y%m%d-%H%M%S"), "cuts": out["cuts"], "before": old / 1e6,
                  "after": d["duration"] / 1e6, "backup": str(bk)})
     log.write_text(json.dumps(prev, ensure_ascii=False, indent=1), encoding="utf-8")
+    if common.update_layout(cfg, lambda o: common.layout_cut(o, cuts)):
+        print("layout/layout.json mapped through the cuts")
     print("written, backup", bk)
     print("regenerating maps (build_maps) ...")
     out["maps"] = build_maps.run(cfg, expect_us=d["duration"], audio_check=audio_check)

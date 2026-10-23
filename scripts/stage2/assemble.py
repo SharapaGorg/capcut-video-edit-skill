@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "layout"))
 import common  # noqa: E402
 import effects  # noqa: E402
 import make_compound as mc  # noqa: E402
-from common import by_start, index, new_id, seg_end, source_role, subtract_ranges, us  # noqa: E402
+from common import index, new_id, seg_end, source_role, subtract_ranges, us  # noqa: E402
 
 MIC_GAIN = 10 ** (4.5 / 20)
 CNEW = Path(__file__).resolve().parent.parent.parent / "templates" / "capcut_new" / "templates.json"
@@ -283,11 +283,7 @@ def assemble(cfg, draft: dict, pairs: list[dict], f_ranges: list[tuple[int, int]
 def validate(draft: dict, res: dict) -> list[str]:
     errs = mc.errors(draft, res["made"])
     ix = index(draft["materials"])
-    for t in draft["tracks"]:
-        segs = by_start(t["segments"])
-        for p, q in zip(segs, segs[1:]):
-            if seg_end(p) > q["target_timerange"]["start"] + 1:
-                errs.append(f"overlap on track {t.get('name') or t['type']} at {seg_end(p) / 1e6:.3f}")
+    errs += common.draft_overlaps(draft)
     comp = res["compounds"]
     by_nid = {c.nid: c for c in res["made"]}
     for nid in [comp["circle"]] + comp["cam_full"]:

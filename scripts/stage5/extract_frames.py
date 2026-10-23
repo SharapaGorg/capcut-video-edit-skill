@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import common  # noqa: E402
+from capcut_new_project import probe  # noqa: E402
 
 
 def used_ranges(cfg, draft: dict) -> dict[str, list[tuple[float, float]]]:
@@ -59,15 +60,22 @@ def run(cfg, only: str | None = None, dry: bool = False) -> dict:
         logs = root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         with open(logs / f"extract_{stem}.log", "w", encoding="utf-8") as log:
-            subprocess.run(["ffmpeg", "-hide_banner", "-y", "-loglevel", "warning", "-ss", str(lo), "-to", str(hi + 1),
-                            "-i", f, "-vf", "fps=1", "-q:v", "2", "-start_number", str(lo), str(out / "%d.jpg")],
-                           stdout=log, stderr=log)
+            r = subprocess.run(["ffmpeg", "-hide_banner", "-y", "-loglevel", "warning", "-ss", str(lo), "-to",
+                                str(hi + 1), "-i", f, "-vf", "fps=1", "-q:v", "2", "-start_number", str(lo),
+                                str(out / "%d.jpg")], stdout=log, stderr=log)
+        if r.returncode != 0:
+            raise SystemExit(f"{stem}: ffmpeg failed (exit {r.returncode}), see {logs / f'extract_{stem}.log'}")
         keep = set(secs)
         removed = 0
         for p in out.glob("*.jpg"):
             if p.stem.isdigit() and int(p.stem) not in keep:
                 p.unlink()
                 removed += 1
+        dur = probe(Path(f))["duration"] / 1e6
+        missing = [s for s in secs if s < int(dur) and not (out / f"{s}.jpg").is_file()]
+        if missing:
+            raise SystemExit(f"{stem}: {len(missing)} frames missing after decoding (e.g. {missing[:5]}): "
+                             "the OCR would silently miss them — check the source / the log")
         print(f"  kept {len(list(out.glob('*.jpg')))}, removed {removed}", flush=True)
     if not dry:
         root.mkdir(parents=True, exist_ok=True)
