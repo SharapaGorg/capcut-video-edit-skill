@@ -11,6 +11,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 import common
@@ -114,17 +116,17 @@ def _append(draft: dict, built) -> list[str]:
     return [m["id"] for _, m in built]
 
 
-def make_all(name: str, draft: dict, cache_root=None, **overrides) -> list[str]:
+def make_all(name: str, draft: dict, cache_root=None, with_extras: bool = True, **overrides) -> list[str]:
     """Like make(), returns ids of the primary material and of all template extras (e.g. adjust_circle:
     temperature, saturation, hsl). Overrides apply to the primary material only."""
     _tpl, built = _build(name, cache_root, overrides)
-    return _append(draft, built)
+    return _append(draft, built if with_extras else built[:1])
 
 
-def make(name: str, draft: dict, cache_root=None, **overrides) -> str:
-    """Clone template <name> into draft['materials'][<category>] (+ its extras), return primary id.
-    Overrides: dotted keys into the primary material, e.g. **{'config.centerX': 0.5}."""
-    return make_all(name, draft, cache_root=cache_root, **overrides)[0]
+def make(name: str, draft: dict, cache_root=None, with_extras: bool = True, **overrides) -> str:
+    """Clone template <name> into draft['materials'][<category>] (+ its extras unless with_extras=False), return
+    primary id. Overrides: dotted keys into the primary material, e.g. **{'config.centerX': 0.5}."""
+    return make_all(name, draft, cache_root=cache_root, with_extras=with_extras, **overrides)[0]
 
 
 def attach(seg: dict, material_id: str) -> None:
@@ -134,37 +136,73 @@ def attach(seg: dict, material_id: str) -> None:
 
 
 # ---- zoom ----
-def zoom_keyframes(seg: dict, t_in: float, t_hold: float, t_out: float, scale: float,
-                   cx: float = 0.0, cy: float = 0.0) -> None:
-    """Zoom on a segment; times in seconds from segment start.
-    Base = current clip.scale x/y (e.g. 0.4 for the circle), zoomed = base * scale; clip.scale untouched.
-    t_in: zoom-in starts (base); ramp = t_out - t_hold; t_in+ramp .. t_hold: hold at `scale`;
-    t_out: back to base. cx/cy: clip.transform x/y at full zoom (PositionX/Y keys only if non-zero).
-    Replaces existing Scale/Position keyframes. ValueError if any key falls outside the segment."""
+ZOOM_PROPS = ("KFTypeScaleX", "KFTypeScaleY", "KFTypePositionX", "KFTypePositionY")
+
+
+def zoom_keyframes(seg: dict, t_in: float, t_hold: float | None, t_out: float | None, scale: float,
+                   cx: float | None = None, cy: float | None = None, ramp_in: float | None = None) -> None:
+    """Zoom on a segment; t_* in seconds of TIMELINE from the segment start.
+    Keys: t_in (base) -> t_in + ramp_in (base*scale) -> t_hold (base*scale) -> t_out (base);
+    ramp_in defaults to t_out - t_hold. t_hold = t_out = None: push-in, 2 keys (t_in base -> t_in + ramp_in zoomed),
+    the zoom holds to the segment end. Base = current clip.scale (0.4 for the circle); clip.scale is untouched.
+    cx/cy: clip.transform x/y at full zoom (1.0 = half the canvas, y up); Position keys go from the clip's current
+    transform to cx/cy and back, only when cx or cy is given.
+    CapCut format (checked on real projects): time_offset = SOURCE time of the key (source_timerange.start +
+    offset x speed); uniform scale -> only KFTypeScaleX. Replaces existing Scale/Position keys.
+    ValueError if the keys are not increasing or fall outside the segment."""
     dur = seg["target_timerange"]["duration"]
-    ramp = t_out - t_hold
-    times = [common.us(t) for t in (t_in, t_in + ramp, t_hold, t_out)]
-    if not (ramp > 0 and 0 <= times[0] < times[1] <= times[2] < times[3] <= dur):
-        raise ValueError(f"zoom keys {times} us must be increasing and within segment duration {dur} us "
-                         f"(t_in + (t_out - t_hold) <= t_hold)")
+    push = t_hold is None and t_out is None
+    if push:
+        if not ramp_in or ramp_in <= 0:
+            raise ValueError("push-in needs ramp_in > 0")
+        tl = [t_in, t_in + ramp_in]
+    else:
+        ramp = t_out - t_hold
+        ri = ramp if ramp_in is None else ramp_in
+        if ramp <= 0 or ri <= 0:
+            raise ValueError(f"zoom ramps must be > 0 (in {ri}, out {ramp})")
+        tl = [t_in, t_in + ri, t_hold, t_out]
+    times = [common.us(t) for t in tl]
+    ok = times[0] >= 0 and times[-1] <= dur and times[0] < times[1]
+    if not push:
+        ok = ok and times[1] <= times[2] < times[3]
+    if not ok:
+        raise ValueError(f"zoom keys {times} us must be increasing and within segment duration {dur} us")
+    sp = float(seg.get("speed", 1.0))
+    src0 = (seg.get("source_timerange") or {}).get("start", 0)
+    offs = [src0 + int(round(t * sp)) for t in times]
     tpl = load_template("keyframes_zoom")
-    sc = (seg.get("clip") or {}).get("scale") or {}
+    clip = seg.get("clip") or {}
+    sc, tr = clip.get("scale") or {}, clip.get("transform") or {}
     bx, by = float(sc.get("x", 1.0)), float(sc.get("y", 1.0))
-    props = {"KFTypeScaleX": [bx, bx * scale, bx * scale, bx], "KFTypeScaleY": [by, by * scale, by * scale, by]}
-    if cx or cy:
-        props["KFTypePositionX"] = [0.0, cx, cx, 0.0]
-        props["KFTypePositionY"] = [0.0, cy, cy, 0.0]
-    kept = [c for c in seg.get("common_keyframes") or []
-            if c.get("property_type") not in ("KFTypeScaleX", "KFTypeScaleY", "KFTypePositionX", "KFTypePositionY")]
+    tx, ty = float(tr.get("x", 0.0)), float(tr.get("y", 0.0))
+
+    def shape(base, top):
+        return [base, top] if push else [base, top, top, base]
+
+    props = {"KFTypeScaleX": shape(bx, bx * scale)}
+    if abs(bx - by) > 1e-9 and not (seg.get("uniform_scale") or {}).get("on"):
+        props["KFTypeScaleY"] = shape(by, by * scale)
+    if cx is not None or cy is not None:
+        props["KFTypePositionX"] = shape(tx, tx if cx is None else cx)
+        props["KFTypePositionY"] = shape(ty, ty if cy is None else cy)
+    kept = [c for c in seg.get("common_keyframes") or [] if c.get("property_type") not in ZOOM_PROPS]
     for prop, vals in props.items():
         e = copy.deepcopy(tpl["entry"])
         e.update(id=new_id(), property_type=prop, keyframe_list=[])
-        for t, v in zip(times, vals):
+        for t, v in zip(offs, vals):
             k = copy.deepcopy(tpl["keyframe"])
             k.update(id=new_id(), time_offset=t, values=[float(v)])
             e["keyframe_list"].append(k)
         kept.append(e)
     seg["common_keyframes"] = kept
+
+
+def keyframes_inside(seg: dict) -> bool:
+    """All keys of the segment lie within its source range (keys are in source time)."""
+    st = seg.get("source_timerange") or {"start": 0, "duration": seg["target_timerange"]["duration"]}
+    lo, hi = st["start"], st["start"] + st["duration"]
+    return all(lo <= k["time_offset"] <= hi for c in seg.get("common_keyframes") or [] for k in c["keyframe_list"])
 
 
 # ---- audio ----
@@ -208,3 +246,71 @@ def adjustment_segment(draft: dict, track: dict, start_us: int, duration_us: int
                enable_adjust=True, enable_hsl=True)
     track.setdefault("segments", []).append(seg)
     return seg["id"]
+
+
+# ---- loudness (ffmpeg ebur128) ----
+SR = 48000
+SFX_LU = -12.0      # SFX / overlay sound = voice - 12 LU (rules.md, «Звук»)
+
+
+def pcm(path, start: float = 0.0, dur: float | None = None, sr: int = SR):
+    """Mono float32 samples of an audio/video file from start (s) for dur (s); empty array if there is no audio."""
+    import numpy as np
+    cmd = ["ffmpeg", "-v", "error", "-ss", f"{max(start, 0):.6f}"]
+    if dur is not None:
+        cmd += ["-t", f"{dur:.6f}"]
+    cmd += ["-i", str(path), "-vn", "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"]
+    out = subprocess.run(cmd, capture_output=True)
+    return np.frombuffer(out.stdout, dtype=np.float32).copy()
+
+
+def loudness(samples, sr: int = SR) -> dict:
+    """EBU R128 of mono float32 samples: {"I": integrated LUFS, "M_max": max momentary (400 ms) LUFS}.
+    Padded with 0.5 s of silence, so a sound shorter than 400 ms has an M. -70 = silence."""
+    import numpy as np
+    x = np.concatenate([np.asarray(samples, dtype=np.float32), np.zeros(int(0.5 * sr), np.float32)])
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "a.f32"
+        x.tofile(f)
+        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-f", "f32le", "-ar", str(sr), "-ac", "1",
+                              "-i", str(f), "-af", "ebur128=framelog=info", "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+    ms = [float(v) for v in re.findall(r"\bM:\s*(-?[\d.]+)", err)]
+    summ = err[err.rfind("Summary:"):] if "Summary:" in err else err
+    m = re.search(r"I:\s*(-?[\d.]+) LUFS", summ)
+    return {"I": float(m.group(1)) if m else -70.0, "M_max": max(ms) if ms else -70.0}
+
+
+def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | None:
+    """Integrated loudness of the voice heard on the timeline in [a_us, b_us): voice and screencast leaf pieces
+    with volume > 0 at speed 1 (sped voice is muted), each x its volume (compound chain included). None if there
+    is no voice there."""
+    import numpy as np
+    n = int(round((b_us - a_us) * sr / 1e6))
+    buf = np.zeros(n, np.float32)
+    got = False
+    for p in common.flatten(cfg, draft, ("voice", "screencast")):
+        if (p["volume"] <= 0 or abs(p["speed"] - 1.0) > 1e-6 or p["src"] is None
+                or p["end"] <= a_us or p["start"] >= b_us):
+            continue
+        x, y = max(p["start"], a_us), min(p["end"], b_us)
+        a = pcm(p["path"], (p["src"] + (x - p["start"])) / 1e6, (y - x) / 1e6, sr) * float(p["volume"])
+        i0 = int(round((x - a_us) * sr / 1e6))
+        a = a[: max(0, n - i0)]
+        buf[i0:i0 + len(a)] += a
+        got = got or len(a) > 0
+    if not got:
+        return None
+    lu = loudness(buf, sr)["I"]
+    return None if lu <= -69.9 else lu
+
+
+def sfx_volume(voice_lu: float, sfx_path, offset_lu: float = SFX_LU, max_volume: float = 10.0) -> dict:
+    """CapCut volume (linear gain: 1.0 = 0 dB, CapCut allows up to +20 dB = 10) for which the SFX peak momentary
+    loudness = voice_lu + offset_lu. Returns {volume, volume_db, sfx_m_max, target, capped}."""
+    m = loudness(pcm(sfx_path))["M_max"]
+    target = voice_lu + offset_lu
+    db = target - m
+    vol = 10 ** (db / 20)
+    return {"volume": round(min(vol, max_volume), 5), "volume_db": round(db, 2), "sfx_m_max": m,
+            "target": round(target, 2), "capped": vol > max_volume}

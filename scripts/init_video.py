@@ -42,6 +42,7 @@ def main(argv=None):
         "master_render": None,
         "work_dir": str(work),
         "tiktok_channel": None,
+        "tessdata": None,
     }
     cp = work / "config.json"
     cp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")

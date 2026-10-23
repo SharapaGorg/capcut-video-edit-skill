@@ -14,7 +14,6 @@ import argparse
 import bisect
 import json
 import re
-import subprocess
 import sys
 import wave
 from collections import Counter
@@ -39,7 +38,7 @@ SIL = -50.0             # dB: below = silence
 BREATH_MAX = -30.0      # sound in a pause louder than this is not a breath
 FILLERS = {"ну", "вот", "типа", "короче", "значит"}
 FILLERS2 = {("как", "бы"), ("в", "общем")}
-FW, FH, FPS2 = 256, 144, 2.0
+FW, FH, FPS2 = common.FW, common.FH, common.FPS2
 
 
 def ends_sentence(w):
@@ -57,10 +56,7 @@ class Screen:
         self.cuts1, self.cache, self.dry = cuts1, cache, dry
         self.pieces = common.flatten(cfg, common.read_draft(cfg), ("screencast",))
         self.frames: dict[str, np.ndarray | None] = {}
-        m = np.ones((FH, FW), bool)
-        m[92:, 167:] = False   # bottom right: camera circle / overlays
-        m[140:, :] = False     # bottom strip: taskbar clock
-        self.mask = m
+        self.mask = common.screen_mask()
 
     def t1(self, t):  # transcript s -> timeline us
         return common.map_through_cuts(t * 1e6, self.cuts1)
@@ -76,12 +72,7 @@ class Screen:
 
     def _file(self, path):
         if path not in self.frames:
-            out = self.cache / (Path(path).name + ".gray")
-            if not out.is_file() and not self.dry:
-                out.parent.mkdir(parents=True, exist_ok=True)
-                subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", f"fps={FPS2},scale={FW}:{FH},format=gray",
-                                "-f", "rawvideo", str(out)], check=True)
-            self.frames[path] = np.fromfile(out, dtype=np.uint8).reshape(-1, FH, FW) if out.is_file() else None
+            self.frames[path] = common.screen_frames(path, self.cache, self.dry)
         return self.frames[path]
 
     def frame(self, t):

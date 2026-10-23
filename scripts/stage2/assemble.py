@@ -48,22 +48,11 @@ def _intersect(a, b, ranges):
     return [(max(a, x), min(b, y)) for x, y in ranges if x < b and y > a]
 
 
-def _merge(ranges, tol=0):
-    out = []
-    for x, y in sorted(ranges):
-        if out and x <= out[-1][1] + tol:
-            out[-1][1] = max(out[-1][1], y)
-        else:
-            out.append([x, y])
-    return [tuple(r) for r in out]
+_merge = common.merge_ranges
 
 
 def layout_f(cfg) -> list[tuple[int, int]]:
-    p = cfg.work_dir / "layout" / "layout.json"
-    if not p.is_file():
-        return []
-    rows = json.loads(p.read_text(encoding="utf-8")).get("layout", [])
-    return _merge([(us(r["start"]), us(r["end"])) for r in rows if r.get("layout") == "F"])
+    return _merge([(us(r["start"]), us(r["end"])) for r in common.read_layout(cfg) if r.get("layout") == "F"])
 
 
 class _Parts:

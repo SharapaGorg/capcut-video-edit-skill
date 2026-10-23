@@ -39,6 +39,7 @@ class Config:
     work_dir: Path = Path(".")
     tiktok_channel: str | None = None
     description_md: str | None = None
+    tessdata: str | None = None      # folder with rus/eng.traineddata if the tesseract install lacks rus
     config_path: Path | None = None
 
 
@@ -71,6 +72,7 @@ def load_config(path: str | None = None) -> Config:
         work_dir=Path(raw["work_dir"]) if raw.get("work_dir") else p.resolve().parent,
         tiktok_channel=raw.get("tiktok_channel"),
         description_md=raw.get("description_md"),
+        tessdata=raw.get("tessdata"),
         config_path=p.resolve(),
     )
 
@@ -219,7 +221,7 @@ def _drafts_ix(d: dict, inherited: dict) -> dict:
 
 def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -> list[dict]:
     """Leaf pieces (also inside compounds, any depth) in timeline time (us), sorted by start:
-    [{path, role, start, end, dur, src, src_end, speed, volume, segment_id, track, compound, kind, name}].
+    [{path, role, start, end, dur, src, src_end, speed, volume, segment_id, track, compound, kind, name, mask}].
     roles: source roles to keep; None = every leaf segment (texts, effects… too, role None).
     Nested pieces are clipped to the window the outer segment shows. speed = effective speed (product down the
     compound chain), volume = product of the volumes down the chain, track = index of the top-level track,
@@ -257,11 +259,19 @@ def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -
                                 "src": src0 + int(round((a2 - a) * sp)) if st else None,
                                 "src_end": src0 + int(round((b2 - a) * sp)) if st else None,
                                 "segment_id": s.get("id"), "track": tr, "kind": kind,
+                                "mask": has_mask(s, ix),
                                 "name": m.get("material_name") or m.get("name") or "",
                                 "compound": " > ".join(ch) if ch else None})
 
     walk(draft, 0, 1.0, 0, 1 << 62, {}, [], 1.0, None)
     return sorted(out, key=lambda x: x["start"])
+
+
+def has_mask(seg: dict, ix: dict) -> bool:
+    """The segment really shows a mask: enable_video_mask and a common_mask material of type "mask" (CapCut ignores
+    enable_video_mask without one, or with type "none" — capcut-format.md)."""
+    return bool(seg.get("enable_video_mask")) and any(
+        e in ix and ix[e][0] == "common_mask" and ix[e][1].get("type") == "mask" for e in seg.get("extra_material_refs") or [])
 
 
 # ---- ids, materials, time ----
@@ -334,19 +344,7 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
     split does; a compound piece gets its own copy of the nested draft). source_timerange is rewritten only for
     trimmed/split segments: start += offset x speed, duration = target x speed. Returns per-piece records
     (track, segment_id, old_start_us, old_end_us, new_start_us, shift_us, removed, cut = trimmed/split)."""
-    mats = draft["materials"]
-    byid = index(mats)
-
-    def clone(mid):
-        if mid not in byid:
-            return mid
-        k, m = byid[mid]
-        c = copy.deepcopy(m)
-        c["id"] = new_id()
-        mats[k].append(c)
-        byid[c["id"]] = (k, c)
-        return c["id"]
-
+    clone = _Cloner(draft)
     rec = []
     for ti, t in enumerate(draft["tracks"]):
         segs = []
@@ -360,13 +358,9 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
             sp = float(s.get("speed", 1.0))
             src0 = (s.get("source_timerange") or {}).get("start")
             for pi, (x, y) in enumerate(parts):
-                seg = s if pi == 0 else copy.deepcopy(s)
-                if pi > 0:
-                    seg["id"] = new_id()
-                    seg["material_id"] = clone(seg["material_id"])
-                    seg["extra_material_refs"] = [clone(e) for e in seg.get("extra_material_refs") or []]
-                if cut and src0 is not None:
-                    seg["source_timerange"] = {"start": src0 + int(round((x - a) * sp)), "duration": int(round((y - x) * sp))}
+                seg = s if pi == 0 else clone.piece(s)
+                if cut:
+                    _retime(seg, a, x, y, sp, src0)
                 nx = map_through_cuts(x, cuts)
                 seg["target_timerange"] = {"start": nx, "duration": y - x}
                 segs.append(seg)
@@ -375,6 +369,318 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
         t["segments"] = segs
     draft["duration"] = map_through_cuts(draft["duration"], cuts)
     return rec
+
+
+class _Cloner:
+    """Fresh copies of materials for a split piece (as CapCut split does: a compound piece gets its own copy of the
+    nested draft). Refs not in the index are kept as they are."""
+
+    def __init__(self, draft: dict):
+        self.mats = draft["materials"]
+        self.byid = index(self.mats)
+
+    def __call__(self, mid):
+        if mid not in self.byid:
+            return mid
+        k, m = self.byid[mid]
+        c = copy.deepcopy(m)
+        c["id"] = new_id()
+        self.mats[k].append(c)
+        self.byid[c["id"]] = (k, c)
+        return c["id"]
+
+    def piece(self, s: dict) -> dict:
+        seg = copy.deepcopy(s)
+        seg["id"] = new_id()
+        seg["material_id"] = self(seg["material_id"])
+        seg["extra_material_refs"] = [self(e) for e in seg.get("extra_material_refs") or []]
+        return seg
+
+
+def _retime(seg: dict, a: int, x: int, y: int, sp: float, src0) -> None:
+    """Piece [x, y) of a segment that starts at a: source start += offset x speed, duration = target x speed."""
+    if src0 is not None:
+        seg["source_timerange"] = {"start": src0 + int(round((x - a) * sp)), "duration": int(round((y - x) * sp))}
+
+
+def clone_piece(draft: dict, seg: dict, x: int, y: int, clone: _Cloner | None = None) -> dict:
+    """A copy of the part [x, y) (timeline us) of a top-level segment, as CapCut copy/split makes it: fresh ids, own
+    copies of the material and extras (a compound piece: own drafts entry, same nested draft), source retimed,
+    target [x, y) (move it yourself). The draft gets the new materials; the segment is not added to a track."""
+    clone = clone or _Cloner(draft)
+    c = clone.piece(seg)
+    _retime(c, seg["target_timerange"]["start"], x, y, float(seg.get("speed", 1.0)),
+            (seg.get("source_timerange") or {}).get("start"))
+    c["target_timerange"] = {"start": x, "duration": y - x}
+    return c
+
+
+def split_at(draft: dict, track: dict, times) -> list[dict]:
+    """Split the segments of `track` at timeline times (us; a time on a boundary or outside every segment is
+    ignored), like CapCut split: the 2nd+ piece gets a cloned material + extras. ValueError for a segment with
+    keyframes (they would have to be redistributed). Returns the track's segments sorted by start."""
+    clone = _Cloner(draft)
+    out = []
+    for s in by_start(track["segments"]):
+        a, b = s["target_timerange"]["start"], seg_end(s)
+        cut = sorted({int(t) for t in times if a < t < b})
+        if not cut:
+            out.append(s)
+            continue
+        if s.get("common_keyframes"):
+            raise ValueError(f"segment {s['id']} at {a / 1e6:.3f} s has keyframes: cannot split it here")
+        sp = float(s.get("speed", 1.0))
+        src0 = (s.get("source_timerange") or {}).get("start")
+        bounds = [a] + cut + [b]
+        for pi, (x, y) in enumerate(zip(bounds, bounds[1:])):
+            seg = s if pi == 0 else clone.piece(s)
+            _retime(seg, a, x, y, sp, src0)
+            seg["target_timerange"] = {"start": x, "duration": y - x}
+            out.append(seg)
+    track["segments"] = out
+    return out
+
+
+def lift(draft: dict, seg: dict, a: int, b: int) -> list[dict]:
+    """Copies of the leaf segments that the top-level segment `seg` (also a compound, any depth) shows in the
+    timeline window [a, b), as top-level segments: target in top timeline us, source clipped, speed = effective
+    speed, volume = product down the chain. Each copy has fresh ids and fresh copies of its material and extras
+    (taken from the draft that holds the leaf). The draft is not changed: returns
+    [{"seg", "mats": [(category, material)], "path"}] sorted by start — add them with adopt()."""
+    out = []
+
+    def walk(s, d, dix, off, k, lo, hi, vol):
+        jx = index(d.get("materials", {}))
+        dix = _drafts_ix(d, dix)
+        ta = off + s["target_timerange"]["start"] / k
+        tb = off + seg_end(s) / k
+        x, y = max(ta, lo), min(tb, hi)
+        if y <= x:
+            return
+        sp = float(s.get("speed", 1.0)) * k
+        v = vol * float(s.get("volume", 1.0))
+        st = s.get("source_timerange")
+        src0 = (st or {}).get("start", 0)
+        dm = next((dix[e] for e in s.get("extra_material_refs") or [] if e in dix), None)
+        if dm is not None and isinstance(dm.get("draft"), dict):
+            nd = dm["draft"]
+            for t in nd.get("tracks", []):
+                for ns in t.get("segments", []):
+                    walk(ns, nd, dix, ta - src0 / sp, sp, x, y, v)
+            return
+        if s.get("material_id") not in jx:
+            return
+        mats = []
+        for mid in [s["material_id"]] + list(s.get("extra_material_refs") or []):
+            if mid in jx:
+                c = copy.deepcopy(jx[mid][1])
+                c["id"] = new_id()
+                mats.append((jx[mid][0], c))
+        c = copy.deepcopy(s)
+        x0, y0 = int(round(x)), int(round(y))
+        c.update(id=new_id(), material_id=mats[0][1]["id"], extra_material_refs=[m["id"] for _, m in mats[1:]],
+                 speed=sp, volume=v, target_timerange={"start": x0, "duration": y0 - x0})
+        if st:
+            c["source_timerange"] = {"start": src0 + int(round((x - ta) * sp)), "duration": int(round((y - x) * sp))}
+        out.append({"seg": c, "mats": mats, "path": mats[0][1].get("path", "") or ""})
+
+    walk(seg, draft, {}, 0, 1.0, a, b, 1.0)
+    return sorted(out, key=lambda p: p["seg"]["target_timerange"]["start"])
+
+
+def adopt(draft: dict, piece: dict, drop_cats=()) -> dict:
+    """Add a lift() piece's materials to the draft, minus extras of drop_cats (e.g. common_mask); returns the segment."""
+    s = piece["seg"]
+    drop = {m["id"] for k, m in piece["mats"][1:] if k in drop_cats}
+    for k, m in piece["mats"]:
+        if m["id"] not in drop:
+            draft["materials"].setdefault(k, []).append(m)
+    s["extra_material_refs"] = [e for e in s.get("extra_material_refs") or [] if e not in drop]
+    return s
+
+
+def merge_ranges(ranges, tol: int = 0) -> list[tuple]:
+    """Sorted union of [a, b) ranges; ranges closer than tol are joined."""
+    out = []
+    for x, y in sorted(ranges):
+        if out and x <= out[-1][1] + tol:
+            out[-1][1] = max(out[-1][1], y)
+        else:
+            out.append([x, y])
+    return [tuple(r) for r in out]
+
+
+def snap(t_s: float, fps: int) -> int:
+    """Seconds -> us on the nearest frame boundary (frame k starts at trunc(k * 1e6 / fps), as in CapCut)."""
+    return int(round(t_s * fps)) * 1_000_000 // fps
+
+
+def parse_ranges(obj) -> list[tuple]:
+    """[[a, b]] | [{"start": a, "end": b}] (seconds; b may be null = to the end) -> [(a, b | None)]."""
+    if isinstance(obj, dict):
+        obj = obj.get("ranges") or obj.get("pieces") or []
+    out = []
+    for r in obj:
+        a, b = (r["start"], r.get("end")) if isinstance(r, dict) else (r[0], r[1] if len(r) > 1 else None)
+        out.append((float(a), None if b is None else float(b)))
+    return out
+
+
+def full_camera_ranges(cfg: Config, draft: dict) -> list[tuple[int, int]]:
+    """Timeline ranges (us) where the camera is on full screen: camera leaf pieces without a mask (any depth)."""
+    tol = int(1e6 / cfg.fps)
+    return merge_ranges([(p["start"], p["end"]) for p in flatten(cfg, draft, ("camera",)) if not p["mask"]], tol)
+
+
+def f_ranges(cfg: Config, draft: dict) -> list[tuple[int, int]]:
+    """Layout F on the timeline (us): full-screen camera in the draft + F rows of layout/layout.json."""
+    rows = [(us(r["start"]), us(r["end"])) for r in read_layout(cfg) if r.get("layout") == "F"]
+    return merge_ranges(full_camera_ranges(cfg, draft) + rows, int(1e6 / cfg.fps))
+
+
+def layout_rows(f: list[tuple[int, int]], duration_us: int, old: list[dict] = ()) -> list[dict]:
+    """Full layout over [0, duration): F ranges, S in between (seconds, 6 decimals); notes of identical old rows kept."""
+    notes = {(round(r["start"], 3), round(r["end"], 3), r["layout"]): r["note"] for r in old if r.get("note")}
+    rows, cur = [], 0
+    for a, b in merge_ranges(f):
+        a, b = max(a, 0), min(b, duration_us)
+        if b <= a:
+            continue
+        if a > cur:
+            rows.append(("S", cur, a))
+        rows.append(("F", a, b))
+        cur = b
+    if cur < duration_us:
+        rows.append(("S", cur, duration_us))
+    out = []
+    for lay, a, b in rows:
+        r = {"start": round(a / 1e6, 6), "end": round(b / 1e6, 6), "layout": lay}
+        n = notes.get((round(r["start"], 3), round(r["end"], 3), lay))
+        if n:
+            r["note"] = n
+        out.append(r)
+    return out
+
+
+# ---- work-dir files shared by stages ----
+def read_layout(cfg: Config) -> list[dict]:
+    """layout/layout.json rows [{start, end, layout: S|F, note?}] (seconds), [] if absent."""
+    p = cfg.work_dir / "layout" / "layout.json"
+    return json.loads(p.read_text(encoding="utf-8")).get("layout", []) if p.is_file() else []
+
+
+def write_layout(cfg: Config, rows: list[dict], **extra) -> Path:
+    p = cfg.work_dir / "layout" / "layout.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    old = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    old.update(extra, layout=rows)
+    p.write_text(json.dumps(old, ensure_ascii=False, indent=1), encoding="utf-8")
+    return p
+
+
+def layout_of(rows: list[dict], a: float, b: float) -> set:
+    """Layouts ('S'/'F') that the rows give over [a, b) seconds; an uncovered part counts as 'S'."""
+    hit = {r["layout"] for r in rows if r["start"] < b and r["end"] > a}
+    covered = sorted((max(r["start"], a), min(r["end"], b)) for r in rows if r["start"] < b and r["end"] > a)
+    if subtract_ranges(a, b, covered):
+        hit.add("S")
+    return hit
+
+
+def timeline_words(cfg: Config) -> list[dict]:
+    """Words of stage3/transcript_timeline.json (timeline seconds), sorted; [] if absent."""
+    p = cfg.work_dir / "stage3" / "transcript_timeline.json"
+    if not p.is_file():
+        return []
+    tt = json.loads(p.read_text(encoding="utf-8"))
+    return sorted((w for s in tt["segments"] for w in s["words"]), key=lambda w: w["start"])
+
+
+def inside_word(words: list[dict], t: float, tol: float = 0.0) -> dict | None:
+    """The word that the time t (s) falls strictly inside (more than tol from both edges), else None."""
+    return next((w for w in words if w["start"] + tol < t < w["end"] - tol), None)
+
+
+# ---- screen frames (2 fps, 256x144 grey) ----
+FW, FH, FPS2 = 256, 144, 2.0
+
+
+def screen_mask():
+    import numpy as np
+    m = np.ones((FH, FW), bool)
+    m[92:, 167:] = False   # bottom right: camera circle / overlays
+    m[140:, :] = False     # bottom strip: taskbar clock
+    return m
+
+
+def screen_frames(path: str, cache: Path, dry: bool = False):
+    """All frames of a screencast file at FPS2, FWxFH grey (cached in cache/<name>.gray); None if not cached and dry."""
+    import numpy as np
+    out = Path(cache) / (Path(path).name + ".gray")
+    if not out.is_file():
+        if dry:
+            return None
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-vf", f"fps={FPS2},scale={FW}:{FH},format=gray",
+                        "-f", "rawvideo", str(out)], check=True)
+    return np.fromfile(out, dtype=np.uint8).reshape(-1, FH, FW)
+
+
+# ---- OCR (tesseract rus+eng) ----
+TESSERACT_DEFAULT = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+
+
+def tesseract(cfg: Config) -> tuple[str, dict]:
+    """(tesseract exe, env) with rus+eng available: cfg.tessdata, else TESSDATA_PREFIX, else the install's tessdata.
+    SystemExit with what to do if tesseract or the rus/eng data is missing."""
+    exe = shutil.which("tesseract") or (str(TESSERACT_DEFAULT) if TESSERACT_DEFAULT.is_file() else None)
+    if not exe:
+        raise SystemExit("tesseract не найден: установить Tesseract-OCR (UB Mannheim) или добавить в PATH")
+    env = dict(os.environ, OMP_THREAD_LIMIT="1")
+    if cfg.tessdata:
+        env["TESSDATA_PREFIX"] = str(cfg.tessdata)
+    out = subprocess.run([exe, "--list-langs"], capture_output=True, text=True, env=env)
+    langs = set((out.stdout + out.stderr).split())
+    if not {"rus", "eng"} <= langs:
+        raise SystemExit(f"tesseract: нет языков rus/eng ({sorted(langs)[:8]}…): положить rus.traineddata и "
+                         "eng.traineddata в папку и указать её в config.json → tessdata")
+    return exe, env
+
+
+def ocr_rows(exe: str, env: dict, img: Path, out_base: Path, psm: int = 11) -> list[dict]:
+    """tesseract TSV of img (cached as <out_base>.tsv): words [{l, t, w, h, conf, text, block, par, line}] (px of img)."""
+    tsv = Path(str(out_base) + ".tsv")
+    if not (tsv.is_file() and tsv.stat().st_size):
+        tsv.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([exe, str(img), str(out_base), "-l", "rus+eng", "--psm", str(psm), "tsv"], env=env,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return read_tsv(tsv)
+
+
+def read_tsv(tsv: Path) -> list[dict]:
+    """Words of a tesseract TSV: [{l, t, w, h, conf, text, block, par, line}]; [] if the file is absent."""
+    rows = []
+    if not Path(tsv).is_file():
+        return rows
+    for line in Path(tsv).read_text(encoding="utf-8", errors="replace").splitlines()[1:]:
+        p = line.split("\t")
+        if len(p) < 12 or not p[11].strip():
+            continue
+        try:
+            rows.append({"block": int(p[2]), "par": int(p[3]), "line": int(p[4]), "l": int(p[6]), "t": int(p[7]),
+                         "w": int(p[8]), "h": int(p[9]), "conf": float(p[10]), "text": p[11].strip()})
+        except ValueError:
+            continue
+    return rows
+
+
+def grab_frame(path: str, t: float, out: Path) -> Path:
+    """One frame of a video file at t seconds -> out (png/jpg), cached."""
+    if not out.is_file():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{max(t, 0):.3f}", "-i", path,
+                        "-frames:v", "1", "-q:v", "2", str(out)], check=True)
+    return out
 
 
 def gap_count(track) -> int:

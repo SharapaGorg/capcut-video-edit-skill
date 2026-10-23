@@ -95,19 +95,19 @@ def test_zoom_keyframes_inside_segment(draft):
     seg = draft["tracks"][0]["segments"][0]  # 5 s
     effects.zoom_keyframes(seg, 1.0, 3.0, 3.5, 1.2, cx=0.1, cy=-0.1)
     kf = {c["property_type"]: c["keyframe_list"] for c in seg["common_keyframes"]}
-    assert set(kf) == {"KFTypeScaleX", "KFTypeScaleY", "KFTypePositionX", "KFTypePositionY"}
+    assert set(kf) == {"KFTypeScaleX", "KFTypePositionX", "KFTypePositionY"}  # uniform scale: ScaleX only
     sx = [(k["time_offset"], k["values"][0]) for k in kf["KFTypeScaleX"]]
     assert sx == [(1_000_000, 1.0), (1_500_000, 1.2), (3_000_000, 1.2), (3_500_000, 1.0)]
     assert [k["values"][0] for k in kf["KFTypePositionX"]] == [0.0, 0.1, 0.1, 0.0]
     dur = seg["target_timerange"]["duration"]
     assert all(0 <= k["time_offset"] <= dur for lst in kf.values() for k in lst)
-    assert len({k["id"] for lst in kf.values() for k in lst}) == 16
+    assert len({k["id"] for lst in kf.values() for k in lst}) == 12
 
 
 def test_zoom_keyframes_without_center_has_no_position(draft):
     seg = draft["tracks"][0]["segments"][0]
     effects.zoom_keyframes(seg, 0.0, 2.0, 2.5, 1.1)
-    assert {c["property_type"] for c in seg["common_keyframes"]} == {"KFTypeScaleX", "KFTypeScaleY"}
+    assert {c["property_type"] for c in seg["common_keyframes"]} == {"KFTypeScaleX"}
 
 
 def test_zoom_keyframes_raises_when_out_beyond_segment(draft):
@@ -139,8 +139,28 @@ def test_zoom_keyframes_uses_base_scale(draft):
     effects.zoom_keyframes(seg, 0.0, 2.0, 2.5, 1.5)
     kf = {c["property_type"]: [k["values"][0] for k in c["keyframe_list"]] for c in seg["common_keyframes"]}
     assert kf["KFTypeScaleX"] == pytest.approx([0.4, 0.6, 0.6, 0.4])
-    assert kf["KFTypeScaleY"] == pytest.approx([0.4, 0.6, 0.6, 0.4])
+    assert "KFTypeScaleY" not in kf
     assert seg["clip"]["scale"] == {"x": 0.4, "y": 0.4}
+
+
+def test_zoom_keyframes_source_time_speed_and_transform(draft):
+    """CapCut stores key time_offset in SOURCE time (start + offset x speed); Position starts from the clip's
+    current transform; non-uniform scale also gets ScaleY."""
+    seg = draft["tracks"][0]["segments"][0]
+    seg.update(speed=2.0, source_timerange={"start": 10_000_000, "duration": 10_000_000},
+               clip={"scale": {"x": 0.4, "y": 0.5}, "transform": {"x": 0.8, "y": -0.6}})
+    effects.zoom_keyframes(seg, 1.0, 3.0, 3.3, 1.5, cx=0.5, ramp_in=0.35)
+    kf = {c["property_type"]: c["keyframe_list"] for c in seg["common_keyframes"]}
+    assert [k["time_offset"] for k in kf["KFTypeScaleX"]] == [12_000_000, 12_700_000, 16_000_000, 16_600_000]
+    assert [k["values"][0] for k in kf["KFTypeScaleY"]] == pytest.approx([0.5, 0.75, 0.75, 0.5])
+    assert [k["values"][0] for k in kf["KFTypePositionX"]] == pytest.approx([0.8, 0.5, 0.5, 0.8])
+    assert [k["values"][0] for k in kf["KFTypePositionY"]] == pytest.approx([-0.6, -0.6, -0.6, -0.6])
+    assert effects.keyframes_inside(seg)
+    effects.zoom_keyframes(seg, 0.5, None, None, 1.1, ramp_in=2.5)   # push-in: holds to the end
+    kf = {c["property_type"]: c["keyframe_list"] for c in seg["common_keyframes"]}
+    assert [(k["time_offset"], round(k["values"][0], 4)) for k in kf["KFTypeScaleX"]] == [(11_000_000, 0.4),
+                                                                                        (16_000_000, 0.44)]
+    assert "KFTypePositionX" not in kf
 
 
 def test_make_raises_when_cache_dir_empty(draft, tmp_path):
