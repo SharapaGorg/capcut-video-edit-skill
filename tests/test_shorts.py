@@ -276,3 +276,26 @@ def test_graphics_keep_shorts_timings(tmp_path):
         tags = re.findall(r'<(?:span|div) class="' + cls + r'[^"]*" data-in[^>]*>', html)
         tags = [t for t in tags if 'data-dist="40"' in t]
         assert tags and all('data-dur="0.22" data-odur="0.25"' in t for t in tags), cls
+
+
+def test_concat_list_survives_quote_in_path(tmp_path):
+    """M4: a ' in the work-dir path must not break the ffmpeg concat list."""
+    import subprocess
+    import build_render
+    wd = tmp_path / "it's work"
+    (wd / "pieces").mkdir(parents=True)
+    out = tmp_path / "o'ut"
+    out.mkdir()
+    files = []
+    for i, d in enumerate((wd / "pieces", wd / "pieces", out)):
+        f = d / f"{i:03d}.wav"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=0.5", str(f)], check=True)
+        files.append(f)
+    lst = build_render.concat_list(wd / "audio.txt", files)
+    assert "file 'pieces/000.wav'" in lst.read_text(encoding="utf-8")
+    res = wd / "all.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(res)],
+                   check=True)
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(res)],
+                               capture_output=True, text=True).stdout)
+    assert abs(dur - 1.5) < 0.05

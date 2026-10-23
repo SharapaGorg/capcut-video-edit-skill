@@ -396,3 +396,18 @@ def test_srt_empty_transcript_and_bom_description(make_project, tmp_path):
     tt.write_text(json.dumps({"duration": 10.0, "segments": []}), encoding="utf-8")
     with pytest.raises(SystemExit, match="нет слов"):
         build_srt.run(cfg, log=lambda *a: None)
+
+
+def test_apply_music_cli_deep_missing_is_a_clear_stop(make_project, tmp_path, monkeypatch):
+    """M1: Deep not in the CapCut cache -> a clear message, exit 1, the project untouched."""
+    import apply_music
+    cfg = music_project(make_project, tmp_path)
+    common.save_config_field(cfg, "music_dir", cfg.music_dir)
+    empty = tmp_path / "empty_cache"
+    empty.mkdir()
+    monkeypatch.setattr(common, "EFFECT_CACHE", empty)
+    before = snapshot(cfg)
+    with pytest.raises(SystemExit) as e:
+        apply_music.main(["--config", str(cfg.config_path)])
+    assert isinstance(e.value.code, str) and "deep_effect" in e.value.code and "проект не изменён" in e.value.code
+    assert snapshot(cfg) == before

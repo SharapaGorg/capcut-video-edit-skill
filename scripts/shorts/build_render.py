@@ -299,6 +299,22 @@ def piece_cmd(ctx, p, out_v, cx):
             '-map', '[v]', '-frames:v', str(n), '-r', str(FPS), '-c:v', 'libx264', '-preset', 'fast', '-crf', '14', '-pix_fmt', 'yuv420p', '-g', '30', str(out_v)]
 
 
+def concat_list(listfile: Path, paths) -> Path:
+    """ffmpeg concat demuxer list: each path relative to the list's folder when inside it, single-quoted with every
+    ' written as '\'' (a ' in the work-dir path broke the list before)."""
+    lines = []
+    for f in paths:
+        f = Path(f)
+        try:
+            f = f.relative_to(listfile.parent)
+        except ValueError:
+            pass
+        q = f.as_posix().replace("'", "'\\''")
+        lines.append(f"file '{q}'\n")
+    listfile.write_text(''.join(lines), encoding='utf-8')
+    return listfile
+
+
 def extract(ctx, pl, wd, spec):
     need_cube(ctx)
     bad = [i for i, p in enumerate(pl['pieces']) if not p.get('aud') or (p['layout'] != 'full' and not p.get('sc'))
@@ -310,7 +326,7 @@ def extract(ctx, pl, wd, spec):
     pdir.mkdir()
     N = len(pl['pieces'])
     with ThreadPoolExecutor(4) as ex: list(ex.map(lambda i: run(audio_cmd(pl['pieces'][i], pdir / f'{i:03d}.wav', ctx.speed)), range(N)))
-    (wd / 'audio.txt').write_text(''.join(f"file '{(pdir / f'{i:03d}.wav').as_posix()}'\n" for i in range(N)), encoding='utf-8')
+    concat_list(wd / 'audio.txt', [pdir / f'{i:03d}.wav' for i in range(N)])
     run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'audio.txt'), '-c', 'copy', str(wd / 'voice_raw.wav')])
     zc = zoom_plan(pl, spec, envelope(wd / 'voice_raw.wav'), ctx.dyn)
     cx = short_cam_x(ctx, pl)
@@ -323,7 +339,7 @@ def extract(ctx, pl, wd, spec):
     for i, p in enumerate(pl['pieces']):
         n = int(run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', str(pdir / f'{i:03d}.mp4')]).stdout.strip().strip(','))
         if n != fr(p['dur']): raise RuntimeError(f'{i:03d}: {n} кадров, ждали {fr(p["dur"])}')
-    (wd / 'video.txt').write_text(''.join(f"file '{(pdir / f'{i:03d}.mp4').as_posix()}'\n" for i in range(N)), encoding='utf-8')
+    concat_list(wd / 'video.txt', [pdir / f'{i:03d}.mp4' for i in range(N)])
     run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'video.txt'), '-c', 'copy', str(wd / 'video.mp4')])
 
 

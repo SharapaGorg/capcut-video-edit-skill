@@ -32,9 +32,9 @@ def seg(sid, mid, start, dur, src, refs=(), volume=1.0, speed=1.0, **kw):
 def compound(nid, dm_id, leaves, mats):
     nested = {"id": nid, "name": nid[:4], "duration": max(common.seg_end(s) for s in leaves),
               "materials": mats, "tracks": [{"type": "video", "segments": []}, {"type": "video", "segments": leaves}]}
-    sub = f"##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##\subdraft\{nid}"
+    sub = f"##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##\\subdraft\\{nid}"
     return {"id": dm_id, "type": "combination", "draft": nested, "combination_id": f"CID-{nid[:4]}",
-            "draft_config_path": f"{sub}\sub_draft_config.json", "draft_file_path": f"{sub}\draft_content.json"}
+            "draft_config_path": f"{sub}\\sub_draft_config.json", "draft_file_path": f"{sub}\\draft_content.json"}
 
 
 @pytest.fixture

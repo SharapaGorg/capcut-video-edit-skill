@@ -14,7 +14,6 @@ factor + lips desaturation; never a free LUT/matrix on a grey scene (pink lips).
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path

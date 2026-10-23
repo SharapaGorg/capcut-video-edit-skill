@@ -355,7 +355,10 @@ def main(argv=None):
     ap.add_argument("--tracks", type=int, help="use the first N files of music_dir (or of --files)")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args(argv)
-    run(common.load_config(a.config), a.files, a.tracks, a.dry)
+    try:
+        run(common.load_config(a.config), a.files, a.tracks, a.dry)
+    except effects.EffectCacheMissing as e:   # Deep not in the CapCut cache: nothing was written
+        raise SystemExit(f"{e}\nмузыка не применена, проект не изменён")
 
 
 if __name__ == "__main__":

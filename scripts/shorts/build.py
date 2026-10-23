@@ -20,7 +20,6 @@ import argparse
 import bisect
 import json
 import re
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
