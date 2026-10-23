@@ -6,9 +6,11 @@ bump update_time, then guard mtime (CapCut must not rewrite the file).
 """
 from __future__ import annotations
 
+import copy
 import functools
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -185,6 +187,12 @@ def _listing(d: str) -> frozenset:
     return frozenset(x.name.lower() for x in p.iterdir() if x.is_file()) if p.is_dir() else frozenset()
 
 
+def uncensored_name(path) -> str:
+    """Base name with the stage-5 suffix dropped: «a b_censored.mp4» -> «a b.mp4» (a censored copy = its source)."""
+    name = Path(str(path).replace("\\", "/")).name
+    return re.sub(r"_censored(\.[^.]+)$", r"\1", name, flags=re.I)
+
+
 def source_role(cfg: Config, path: str) -> str | None:
     """'camera' | 'screencast' | 'voice' | None for a material path: by folder prefix from cfg.sources,
     else by file name present in that folder (the project may use a local copy of the sources)."""
@@ -195,7 +203,7 @@ def source_role(cfg: Config, path: str) -> str | None:
     for role, d in dirs:
         if d and p.startswith(_norm(d) + "/"):
             return role
-    name = Path(str(path).replace("\\", "/")).name.lower()
+    name = uncensored_name(path).lower()
     for role, d in dirs:
         if d and name in _listing(d):
             return role
@@ -210,19 +218,23 @@ def _drafts_ix(d: dict, inherited: dict) -> dict:
 
 
 def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -> list[dict]:
-    """Source pieces of the given roles, also inside compounds, in timeline time (us), sorted by start:
-    [{path, role, start, dur, src, speed, volume}]. Nested pieces are clipped to the window the outer segment shows;
-    speed of compound segments is applied (speed = effective speed of the piece)."""
+    """Leaf pieces (also inside compounds, any depth) in timeline time (us), sorted by start:
+    [{path, role, start, end, dur, src, src_end, speed, volume, segment_id, track, compound, kind, name}].
+    roles: source roles to keep; None = every leaf segment (texts, effects… too, role None).
+    Nested pieces are clipped to the window the outer segment shows. speed = effective speed (product down the
+    compound chain), volume = product of the volumes down the chain, track = index of the top-level track,
+    compound = "nested name#track > …" (None on the top level), src/src_end = None without source_timerange."""
     out = []
 
-    def walk(d, off, k, lo, hi, dix):  # timeline = off + (time inside d) / k; visible window [lo, hi)
+    def walk(d, off, k, lo, hi, dix, chain, vol, top):  # timeline = off + (time inside d) / k; window [lo, hi)
         ix = index(d.get("materials", {}))
         dix = _drafts_ix(d, dix)
-        for t in d.get("tracks", []):
+        for ti, t in enumerate(d.get("tracks", [])):
+            ch = chain if top is None else chain + [f"{d.get('name', '')}#{ti}"]
             for s in t.get("segments", []):
                 if s.get("material_id") not in ix:
                     continue
-                m = ix[s["material_id"]][1]
+                kind, m = ix[s["material_id"]]
                 dm = next((dix[e] for e in s.get("extra_material_refs") or [] if e in dix), None)
                 a = off + s["target_timerange"]["start"] / k
                 b = off + seg_end(s) / k
@@ -230,16 +242,25 @@ def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -
                 if b2 <= a2:
                     continue
                 sp = float(s.get("speed", 1.0)) * k
-                src0 = (s.get("source_timerange") or {}).get("start", 0)
+                sv = vol * float(s.get("volume", 1.0))
+                tr = ti if top is None else top
+                st = s.get("source_timerange")
+                src0 = (st or {}).get("start", 0)
                 if dm is not None and isinstance(dm.get("draft"), dict):
-                    walk(dm["draft"], a - src0 / sp, sp, a2, b2, dix)
+                    walk(dm["draft"], a - src0 / sp, sp, a2, b2, dix, ch, sv, tr)
                     continue
                 role = source_role(cfg, m.get("path", ""))
-                if role in roles:
-                    out.append({"path": m["path"], "role": role, "start": int(round(a2)), "dur": int(round(b2 - a2)),
-                                "speed": sp, "src": src0 + int(round((a2 - a) * sp)), "volume": float(s.get("volume", 1.0))})
+                if roles is None or role in roles:
+                    s0, s1 = int(round(a2)), int(round(b2))
+                    out.append({"path": m.get("path", "") or "", "role": role, "start": s0, "end": s1, "dur": s1 - s0,
+                                "speed": sp, "volume": sv,
+                                "src": src0 + int(round((a2 - a) * sp)) if st else None,
+                                "src_end": src0 + int(round((b2 - a) * sp)) if st else None,
+                                "segment_id": s.get("id"), "track": tr, "kind": kind,
+                                "name": m.get("material_name") or m.get("name") or "",
+                                "compound": " > ".join(ch) if ch else None})
 
-    walk(draft, 0, 1.0, 0, 1 << 62, {})
+    walk(draft, 0, 1.0, 0, 1 << 62, {}, [], 1.0, None)
     return sorted(out, key=lambda x: x["start"])
 
 
@@ -305,6 +326,55 @@ def map_through_cuts(t, cuts):
     """Time t after removing the [a, b) ranges `cuts` (ripple): t minus the cut length before it. A point inside a
     cut maps to the cut start. Used for transcript time -> timeline time after stage 1."""
     return t - sum(min(b, t) - a for a, b in cuts if a < t)
+
+
+def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
+    """Remove [a, b) ranges (top-level timeline us, sorted, non-overlapping) from every track and shift the rest
+    left. A segment crossing a cut is split: the 2nd+ piece gets a cloned material and cloned extra refs (as CapCut
+    split does; a compound piece gets its own copy of the nested draft). source_timerange is rewritten only for
+    trimmed/split segments: start += offset x speed, duration = target x speed. Returns per-piece records
+    (track, segment_id, old_start_us, old_end_us, new_start_us, shift_us, removed, cut = trimmed/split)."""
+    mats = draft["materials"]
+    byid = index(mats)
+
+    def clone(mid):
+        if mid not in byid:
+            return mid
+        k, m = byid[mid]
+        c = copy.deepcopy(m)
+        c["id"] = new_id()
+        mats[k].append(c)
+        byid[c["id"]] = (k, c)
+        return c["id"]
+
+    rec = []
+    for ti, t in enumerate(draft["tracks"]):
+        segs = []
+        for s in by_start(t["segments"]):
+            a, b = s["target_timerange"]["start"], seg_end(s)
+            parts = subtract_ranges(a, b, cuts)
+            if not parts:
+                rec.append({"track": ti, "segment_id": s["id"], "old_start_us": a, "old_end_us": b, "removed": True})
+                continue
+            cut = parts != [(a, b)]
+            sp = float(s.get("speed", 1.0))
+            src0 = (s.get("source_timerange") or {}).get("start")
+            for pi, (x, y) in enumerate(parts):
+                seg = s if pi == 0 else copy.deepcopy(s)
+                if pi > 0:
+                    seg["id"] = new_id()
+                    seg["material_id"] = clone(seg["material_id"])
+                    seg["extra_material_refs"] = [clone(e) for e in seg.get("extra_material_refs") or []]
+                if cut and src0 is not None:
+                    seg["source_timerange"] = {"start": src0 + int(round((x - a) * sp)), "duration": int(round((y - x) * sp))}
+                nx = map_through_cuts(x, cuts)
+                seg["target_timerange"] = {"start": nx, "duration": y - x}
+                segs.append(seg)
+                rec.append({"track": ti, "segment_id": seg["id"], "old_start_us": x, "old_end_us": y,
+                            "new_start_us": nx, "shift_us": x - nx, "removed": False, "cut": cut})
+        t["segments"] = segs
+    draft["duration"] = map_through_cuts(draft["duration"], cuts)
+    return rec
 
 
 def gap_count(track) -> int:

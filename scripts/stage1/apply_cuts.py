@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import common  # noqa: E402
-from common import by_start, index, new_id, seg_end  # noqa: E402
+from common import by_start, seg_end  # noqa: E402
 
 
 def approved_cuts(s1: Path, fps: int) -> list[dict]:
@@ -40,48 +40,7 @@ def approved_cuts(s1: Path, fps: int) -> list[dict]:
     return [c for c in out if c["end_us"] > c["start_us"]]
 
 
-def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
-    """Remove [a, b) ranges (timeline us) from every track, shift the rest left. Returns per-piece records."""
-    mats = draft["materials"]
-    byid = index(mats)
-
-    def new_t(t):
-        return common.map_through_cuts(t, cuts)
-
-    def clone(mid):
-        k, m = byid[mid]
-        c = copy.deepcopy(m)
-        c["id"] = new_id()
-        mats[k].append(c)
-        byid[c["id"]] = (k, c)
-        return c["id"]
-
-    rec = []
-    for ti, t in enumerate(draft["tracks"]):
-        segs = []
-        for s in by_start(t["segments"]):
-            a, b = s["target_timerange"]["start"], seg_end(s)
-            parts = common.subtract_ranges(a, b, cuts)
-            if not parts:
-                rec.append({"track": ti, "segment_id": s["id"], "old_start_us": a, "old_end_us": b, "removed": True})
-                continue
-            sp = float(s.get("speed", 1.0))
-            src0 = (s.get("source_timerange") or {}).get("start")
-            for pi, (x, y) in enumerate(parts):
-                seg = s if pi == 0 else copy.deepcopy(s)
-                if pi > 0:
-                    seg["id"] = new_id()
-                    seg["material_id"] = clone(seg["material_id"])
-                    seg["extra_material_refs"] = [clone(e) for e in seg.get("extra_material_refs") or []]
-                if src0 is not None:
-                    seg["source_timerange"] = {"start": src0 + int(round((x - a) * sp)), "duration": int(round((y - x) * sp))}
-                seg["target_timerange"] = {"start": new_t(x), "duration": y - x}
-                segs.append(seg)
-                rec.append({"track": ti, "segment_id": seg["id"], "old_start_us": x, "old_end_us": y,
-                            "new_start_us": new_t(x), "shift_us": x - new_t(x), "removed": False})
-        t["segments"] = segs
-    draft["duration"] = new_t(draft["duration"])
-    return rec
+ripple = common.ripple  # shared with stage3/ripple_cut.py
 
 
 def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
