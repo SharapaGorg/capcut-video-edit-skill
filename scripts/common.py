@@ -830,6 +830,19 @@ def draft_overlaps(draft: dict) -> list[str]:
     return [e for i, t in enumerate(draft["tracks"]) for e in overlap_errors(t, t.get("name") or f"{t['type']}#{i}")]
 
 
+def piece_overlaps(pieces: list[dict], tol: int = 1) -> list[str]:
+    """Flat pieces (common.flatten) that overlap in timeline time (> tol us), as messages with the range and both
+    files — e.g. voice pieces of the dump lying on top of each other (they would be mixed into one transcript)."""
+    out, cur = [], None
+    for p in sorted(pieces, key=lambda x: x["start"]):
+        if cur is not None and p["start"] < cur["end"] - tol:
+            out.append(f"{p['start'] / 1e6:.3f}–{min(p['end'], cur['end']) / 1e6:.3f} s: "
+                       f"{Path(cur['path']).name} and {Path(p['path']).name}")
+        if cur is None or p["end"] > cur["end"]:
+            cur = p
+    return out
+
+
 def gap_count(track) -> int:
     """Holes (> 1 us) between consecutive segments of a track."""
     segs = by_start(track["segments"])

@@ -109,9 +109,9 @@ class VoiceMap:
             raise SystemExit("raw draft: no voice pieces (cfg.sources voice/screencasts)")
         if any(abs(p["speed"] - 1.0) > 1e-9 for p in rv):
             raise SystemExit("raw draft has sped voice pieces: it is not the transcribed timeline (--raw)")
-        for p, q in zip(rv, rv[1:]):
-            if q["start"] < p["end"] - 1:
-                raise SystemExit(f"raw draft: voice pieces overlap at {q['start'] / 1e6:.3f} s (transcript time ambiguous)")
+        over = common.piece_overlaps(rv)
+        if over:
+            raise SystemExit("raw draft: voice pieces overlap (transcript time ambiguous): " + "; ".join(over))
         end = max(p["end"] for p in rv)
         if transcript_duration is not None and abs(transcript_duration - end / 1e6) > 0.1:
             raise SystemExit(f"raw draft voice ends at {end / 1e6:.3f} s, transcript is {transcript_duration:.3f} s: "

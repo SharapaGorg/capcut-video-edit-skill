@@ -253,3 +253,17 @@ def test_audio_check_without_ffmpeg_is_skipped(project, tmp_path, monkeypatch):
     monkeypatch.setattr(build_maps.shutil, "which", lambda name: None)
     res = build_maps.run(cfg, audio_check=True)
     assert "audio check skipped: ffmpeg not found" in res["notes"] and res["errs"] == []
+
+
+def test_transcribe_stops_on_overlapping_voice(project, tmp_path):
+    """I7: overlapping voice pieces in the dump are stopped in stage 0 (before whisper, also --dry), with ranges."""
+    import transcribe
+    sc = src_dir(tmp_path, "screencasts", ["a.mp4", "b.mp4"])
+    d = draft([("video", [seg("A", "MA", 0, 10 * S, 0)]), ("video", [seg("B", "MB", 8 * S, 7 * S, 0)])],
+              videos=[vmat("MA", (sc / "a.mp4").as_posix()), vmat("MB", (sc / "b.mp4").as_posix())])
+    cfg = project({"screencasts": str(sc)}, d, d, words_at((0.1, 0.5)))
+    with pytest.raises(SystemExit) as e:
+        transcribe.main(["--config", str(cfg.config_path), "--dry"])
+    assert "8.000–10.000 s: a.mp4 and b.mp4" in str(e.value)
+    assert not (cfg.work_dir / "transcript" / "voice_16k.wav").exists()
+    assert common.piece_overlaps([{"start": 0, "end": 5, "path": "x"}, {"start": 5, "end": 9, "path": "y"}]) == []

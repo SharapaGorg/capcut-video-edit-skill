@@ -4,7 +4,9 @@
 
 Voice = the voice segments of the timeline (voice/ mic + screencast audio from cfg.sources; camera never),
 mixed from the SOURCE files at their timeline positions -> transcript/voice_16k.wav (16 kHz mono). So transcript
-time = timeline time before stage 1. --audio: transcribe that file instead (an extra piece).
+time = timeline time before stage 1. Voice pieces that overlap on the timeline (mic over screencast audio, two
+screencasts on top of each other) -> stop with the ranges before whisper (also with --dry): the transcript time
+would be ambiguous (stage 3 refuses such a draft too) — move them apart in CapCut first. --audio: transcribe that file instead (an extra piece).
 faster-whisper large-v3-turbo, cpu, int8, ru, word_timestamps, vad_filter. Progress lines are flushed — run in
 the background with output to a log. Outputs (transcript/): <prefix>.json (segments + words), <prefix>.txt
 (`[мм:сс.с–мм:сс.с] текст`), <prefix>.srt; then the STAGE_0 checks (exit 1 on a failed check).
@@ -147,6 +149,10 @@ def main(argv=None):
         segs = voice_segments(cfg, common.read_draft(cfg))
         if not segs:
             raise SystemExit("no voice segments (voice/ or screencasts/ from cfg.sources) on the timeline")
+        over = common.piece_overlaps(segs)
+        if over:
+            raise SystemExit("куски голоса перекрываются на таймлайне (смешались бы в одну расшифровку; этап 3 такой "
+                             "драфт не примет) — разнести в CapCut и запустить снова:\n  - " + "\n  - ".join(over))
         files = sorted({Path(s["path"]).name for s in segs})
         end = max(s["start"] + s["dur"] for s in segs) / 1e6
         print(f"voice: {len(segs)} segments from {len(files)} files {files}, timeline 0–{end:.1f} s")
