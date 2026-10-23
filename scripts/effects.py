@@ -201,6 +201,45 @@ def zoom_keyframes(seg: dict, t_in: float, t_hold: float | None, t_out: float | 
     seg["common_keyframes"] = kept
 
 
+def alpha_keyframes(seg: dict, pts: list[tuple[float, float]], scale: float, cx: float | None = None,
+                    cy: float | None = None) -> None:
+    """One part of a zoom that spans several segments (a zoom over pieces cut inside a compound): pts = [(t s of
+    TIMELINE from the segment start, alpha 0..1)], increasing, inside the segment; at alpha a the clip is
+    base x (1 + (scale − 1) a) and its position base + (cx/cy − base) a — the same linear curve zoom_keyframes
+    draws, sampled at this segment's edges and at the zoom's key times inside it. Same key format as
+    zoom_keyframes (time_offset = source time, ScaleX only for a uniform clip). Replaces Scale/Position keys."""
+    dur = seg["target_timerange"]["duration"]
+    times = [common.us(t) for t, _a in pts]
+    if any(t < 0 or t > dur for t in times) or any(q <= p for p, q in zip(times, times[1:])):
+        raise ValueError(f"keys {times} us must be increasing and within segment duration {dur} us")
+    sp = float(seg.get("speed", 1.0))
+    src0 = (seg.get("source_timerange") or {}).get("start", 0)
+    offs = [src0 + int(round(t * sp)) for t in times]
+    tpl = load_template("keyframes_zoom")
+    clip = seg.get("clip") or {}
+    sc, tr = clip.get("scale") or {}, clip.get("transform") or {}
+    bx, by = float(sc.get("x", 1.0)), float(sc.get("y", 1.0))
+    tx, ty = float(tr.get("x", 0.0)), float(tr.get("y", 0.0))
+    al = [a for _t, a in pts]
+    props = {"KFTypeScaleX": [bx * (1 + (scale - 1) * a) for a in al]}
+    us_flag = (seg.get("uniform_scale") or {}).get("on")
+    if not (us_flag if us_flag is not None else abs(bx - by) <= 1e-9):
+        props["KFTypeScaleY"] = [by * (1 + (scale - 1) * a) for a in al]
+    if cx is not None or cy is not None:
+        props["KFTypePositionX"] = [tx + ((tx if cx is None else cx) - tx) * a for a in al]
+        props["KFTypePositionY"] = [ty + ((ty if cy is None else cy) - ty) * a for a in al]
+    kept = [c for c in seg.get("common_keyframes") or [] if c.get("property_type") not in ZOOM_PROPS]
+    for prop, vals in props.items():
+        e = copy.deepcopy(tpl["entry"])
+        e.update(id=new_id(), property_type=prop, keyframe_list=[])
+        for t, v in zip(offs, vals):
+            k = copy.deepcopy(tpl["keyframe"])
+            k.update(id=new_id(), time_offset=t, values=[round(float(v), 6)])
+            e["keyframe_list"].append(k)
+        kept.append(e)
+    seg["common_keyframes"] = kept
+
+
 def keyframes_inside(seg: dict) -> bool:
     """All keys of the segment lie within its source range (keys are in source time)."""
     st = seg.get("source_timerange") or {"start": 0, "duration": seg["target_timerange"]["duration"]}

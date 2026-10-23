@@ -580,7 +580,9 @@ def test_focus_zoom_keys_on_leaf_inside_screencast_compound(make_project, tmp_pa
     cfg, spec, _v, _sr = zoom_project(make_project, tmp_path)
     d = common.read_draft(cfg)
     sc = d["materials"]["videos"][0]["path"]
-    nested = compound(NID_SC, "DM2", [seg("SL", "MSCn", 0, 20 * S, 0)], {"videos": [vmat("MSCn", sc)]})
+    # a cut inside the compound at 7 s (stage 2 cuts come before the compound): zoom 1 (5–9 s) spans two leaves
+    nested = compound(NID_SC, "DM2", [seg("SL", "MSCn", 0, 7 * S, 0), seg("SL2", "MSCn", 7 * S, 13 * S, 8 * S)],
+                      {"videos": [vmat("MSCn", sc)]})
     d["materials"]["drafts"] = [nested]
     d["materials"]["videos"].append(vmat("MCOMP", ""))
     d["tracks"][0]["segments"] = [seg("SCO", "MCOMP", 0, 20 * S, 0, refs=["DM2"])]
@@ -603,11 +605,23 @@ def test_focus_zoom_keys_on_leaf_inside_screencast_compound(make_project, tmp_pa
         "common_keyframes")
     inner = common.by_start(d2["materials"]["drafts"][0]["draft"]["tracks"][-1]["segments"])
     assert [(s["target_timerange"]["start"], common.seg_end(s)) for s in inner] == [
-        (0, 5 * S), (5 * S, 9 * S), (9 * S, 17 * S), (17 * S, 19_500_000), (19_500_000, 20 * S)]
-    assert [bool(s.get("common_keyframes")) for s in inner] == [False, True, False, True, False]
+        (0, 5 * S), (5 * S, 7 * S), (7 * S, 9 * S), (9 * S, 17 * S), (17 * S, 19_500_000), (19_500_000, 20 * S)]
+    assert [bool(s.get("common_keyframes")) for s in inner] == [False, True, True, False, True, False]
     assert all(effects.keyframes_inside(s) for s in inner)
+
+    def kf(s, prop):
+        return next(c for c in s["common_keyframes"] if c["property_type"] == prop)["keyframe_list"]
+    a, b = inner[1], inner[2]          # the zoom over the inner cut: one continuous curve
+    for prop in ("KFTypeScaleX", "KFTypePositionX"):
+        assert kf(a, prop)[0]["values"] == [1.0 if prop == "KFTypeScaleX" else 0.0]
+        assert kf(a, prop)[-1]["values"] == kf(b, prop)[0]["values"]
+        assert kf(b, prop)[-1]["values"] == [1.0 if prop == "KFTypeScaleX" else 0.0]
+    assert max(k["values"][0] for k in kf(a, "KFTypeScaleX")) == 1.5
+    assert kf(b, "KFTypeScaleX")[0]["time_offset"] == 8 * S     # source time of the 2nd leaf
+    zj = json.loads((cfg.work_dir / "stage6" / "zooms.json").read_text(encoding="utf-8"))
+    assert zj["focus"][0]["segment_ids"] == [a["id"], b["id"]]
     w = json.loads((sd / "draft_content.json").read_text(encoding="utf-8"))
-    assert len(w["materials"]["drafts"][0]["draft"]["tracks"][-1]["segments"]) == 5
+    assert len(w["materials"]["drafts"][0]["draft"]["tracks"][-1]["segments"]) == 6
     assert not aac.exists() and json.loads((sd / "sub_draft_config.json").read_text())["audio_path"] == ""
     assert len(mc.pieces(d2, NID_SC)) == 1
     reps = check_zooms.run(cfg, frames=False)

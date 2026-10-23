@@ -2,7 +2,7 @@
 
     python -X utf8 scripts/stage6/check_zooms.py --config config.json [--no-frames]
 
-Per focus zoom: the keys are on one segment and inside it; the element centre is inside the visible area at the
+Per focus zoom: the keys are on its segment(s) (segment_ids: a zoom over pieces cut inside the compound) and inside; the element centre is inside the visible area at the
 peak (40 px margin) and not under the camera circle (circle from the project: clip + mask of the circle piece);
 frames at the start/end of the peak with the visible area, the circle and the element drawn -> stage6/check/NN.png
 (look at them); OCR of the end frame: the word is still near the centre (no scrolling inside the zoom);
@@ -120,10 +120,11 @@ def run(cfg, frames: bool = True) -> list[dict]:
     report = []
     for z in zj.get("focus", []):
         r = {"n": z["n"], "start": z["start"], "end": z["end"], "problems": []}
-        seg = segs.get(z["segment_id"])
-        if seg is None or not any(c.get("property_type") in effects.ZOOM_PROPS for c in seg.get("common_keyframes") or []):
+        zs = [segs.get(i) for i in z.get("segment_ids") or [z["segment_id"]]]
+        if any(seg is None or not any(c.get("property_type") in effects.ZOOM_PROPS for c in seg.get("common_keyframes") or [])
+               for seg in zs):
             r["problems"].append("zoom keys not found on the segment")
-        elif not effects.keyframes_inside(seg):
+        elif not all(effects.keyframes_inside(seg) for seg in zs):
             r["problems"].append("keys outside the segment")
         rect = visible(z["position"], z["scale"], W, H)
         c = z["center"]

@@ -10,10 +10,11 @@ Spec (the approved zoom_proposal.md), timeline seconds:
    "sfx":     ["a.wav", "b.wav"]}      # optional: SFX files in cfg.sfx_dir to alternate (default: first 3 there)
 Focus: only where layout.json is S over the whole zoom, >= 2 s, >= 8 s apart, screencast at speed 1, inside ONE
 top-level segment of the screencast track. The keys go on the screencast LEAF: a raw top-level segment, or the
-segment inside the screencast compound (any depth; rules.md: further cutting inside nested drafts) — that leaf is
-split at the zoom edges (CapCut-style) inside its nested draft, the outer compound stays whole (no nested draft
-copies), the subdraft folder is refreshed and an audio pre-render of the compound (if any) cleared; in 350 ms,
-out 300 ms, effects.zoom_keyframes. SFX on every focus entry: start = zoom start, files
+segment(s) inside the screencast compound (any depth; rules.md: further cutting inside nested drafts) — the leaves
+under the zoom are split at the zoom edges (CapCut-style) inside their nested draft, the outer compound stays whole
+(no nested draft copies), the subdraft folder is refreshed and an audio pre-render of the compound (if any)
+cleared; in 350 ms, out 300 ms: effects.zoom_keyframes on one leaf; a zoom over several leaves (cuts inside the
+compound) gets the same curve split over them (effects.alpha_keyframes). SFX on every focus entry: start = zoom start, files
 alternate (never the same twice in a row), level = voice − 12 LU (effects.voice_lufs over ±5 s around the zoom,
 effects.sfx_volume). cfg.sfx_dir unset -> stop and ask for it. Writes both drafts (+ subdrafts touched by zooms)
 and stage6/zooms.json (applied zooms, for stages 7–8). A zoom that is already there (keys on the piece / an SFX at
@@ -110,8 +111,8 @@ def camera_leaf(cfg, d: dict, t_us: int):
 
 def zoom_target(d: dict, track: dict, host: dict, A: int, B: int):
     """Where the focus keys go for [A, B) (top timeline us) on the top-level segment `host` of `track`: descend
-    through compounds to the one video leaf showing that window. -> (container draft, its track, leaf, x, y in
-    container time, [drafts entries on the way]) or a str error."""
+    through compounds to the video leaves showing that window (one track, raw segments, back to back). ->
+    (container draft, its track, [leaves], x, y in container time, [drafts entries on the way]) or a str error."""
     container, tr, seg, x, y, chain = d, track, host, A, B, []
     dix = common._drafts_ix(d, {})
     while True:
@@ -119,7 +120,7 @@ def zoom_target(d: dict, track: dict, host: dict, A: int, B: int):
         if dm is None or not isinstance(dm.get("draft"), dict):
             if not (seg["target_timerange"]["start"] <= x and y <= seg_end(seg)):
                 return f"the screencast piece {seg['id']} does not cover the whole zoom (a cut inside the zoom)"
-            return container, tr, seg, x, y, chain
+            return container, tr, [seg], x, y, chain
         sp = float(seg.get("speed", 1.0))
         src0 = (seg.get("source_timerange") or {}).get("start", 0)
         a = seg["target_timerange"]["start"]
@@ -127,12 +128,33 @@ def zoom_target(d: dict, track: dict, host: dict, A: int, B: int):
         nd = dm["draft"]
         hits = [(t, s) for t in nd.get("tracks", []) if t.get("type") == "video" for s in t.get("segments", [])
                 if s["target_timerange"]["start"] < y and seg_end(s) > x]
-        if len(hits) != 1:
-            return f"{len(hits)} video pieces inside the compound under the zoom (one is needed: move the zoom)"
         chain.append(dm)
         dix = common._drafts_ix(nd, dix)
         container = nd
-        tr, seg = hits[0]
+        if len(hits) == 1:
+            tr, seg = hits[0]
+            continue
+        if not hits:
+            return "no video inside the compound under the zoom"
+        if len({id(t) for t, _s in hits}) != 1:
+            return "video pieces on several tracks inside the compound under the zoom (move the zoom)"
+        leaves = by_start([s for _t, s in hits])
+        if any(e in dix and isinstance(dix[e].get("draft"), dict) for s in leaves for e in s.get("extra_material_refs") or []):
+            return "a compound among several pieces under the zoom (move the zoom)"
+        if leaves[0]["target_timerange"]["start"] > x or seg_end(leaves[-1]) < y or \
+                any(q["target_timerange"]["start"] - seg_end(p) > 1 for p, q in zip(leaves, leaves[1:])):
+            return "a hole inside the compound under the zoom"
+        return container, hits[0][0], leaves, x, y, chain
+
+
+def _alpha(curve: list[tuple[float, float]], t: float) -> float:
+    """Piecewise-linear zoom amount 0..1 of the curve [(t, alpha)] at t (clamped at the ends)."""
+    if t <= curve[0][0]:
+        return curve[0][1]
+    for (t0, a0), (t1, a1) in zip(curve, curve[1:]):
+        if t <= t1:
+            return a0 + (a1 - a0) * (t - t0) / (t1 - t0) if t1 > t0 else a1
+    return curve[-1][1]
 
 
 def merge_zooms(path: Path, out: dict) -> dict:
@@ -194,7 +216,7 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
             tg = zoom_target(d, track, host[0], z["A"], z["B"])
             if isinstance(tg, str):
                 errs.append(f"focus {z['n']}: {tg}")
-            elif any(c.get("property_type") in effects.ZOOM_PROPS for c in tg[2].get("common_keyframes") or []):
+            elif any(c.get("property_type") in effects.ZOOM_PROPS for lf in tg[2] for c in lf.get("common_keyframes") or []):
                 errs.append(f"focus {z['n']}: the segment already has zoom keys (applied before?)")
     sfx_track = next((t for t in d["tracks"] if t["type"] == "audio" and t.get("name") == SFX_TRACK), None)
     for z in focus:
@@ -207,20 +229,28 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
     touched, stale = set(), []
     for z in focus:
         host = next(s for s in track["segments"] if s["target_timerange"]["start"] < z["B"] and seg_end(s) > z["A"])
-        container, tr, _leaf, x, y, chain = zoom_target(d, track, host, z["A"], z["B"])
+        container, tr, _leaves, x, y, chain = zoom_target(d, track, host, z["A"], z["B"])
         common.split_at(container, tr, [x, y])
-        piece = next(s for s in tr["segments"] if s["target_timerange"]["start"] == x)
+        parts = by_start([s for s in tr["segments"] if x <= s["target_timerange"]["start"] < y])
+        piece = parts[0]
         for dm in chain:
             touched.add(dm["draft"]["id"])
             r = mc.stale_prerender(cfg, dm)
             if r and r not in stale:
                 stale.append(r)
-        D = (seg_end(piece) - x) / 1e6
+        D = (y - x) / 1e6
         base = float(((piece.get("clip") or {}).get("scale") or {}).get("x", 1.0))
         px, py = focus_pos(z["center"], z["scale"], base, cfg.width, cfg.height)
-        effects.zoom_keyframes(piece, 0.0, D - OUT_S - frame, D - frame, z["scale"], cx=px, cy=py, ramp_in=IN_S)
-        z.update(segment_id=piece["id"], position=[px, py], peak=[round(z["A"] / 1e6 + IN_S, 6),
-                                                                  round(z["B"] / 1e6 - OUT_S - frame, 6)])
+        if len(parts) == 1:
+            effects.zoom_keyframes(piece, 0.0, D - OUT_S - frame, D - frame, z["scale"], cx=px, cy=py, ramp_in=IN_S)
+        else:   # cuts inside the compound under the zoom: the same curve over the pieces
+            curve = [(0.0, 0.0), (IN_S, 1.0), (D - OUT_S - frame, 1.0), (D - frame, 0.0)]
+            for s in parts:
+                o, L = (s["target_timerange"]["start"] - x) / 1e6, s["target_timerange"]["duration"] / 1e6
+                ts = sorted({0.0, L} | {round(t - o, 6) for t, _a in curve if 0 < t - o < L})
+                effects.alpha_keyframes(s, [(t, _alpha(curve, o + t)) for t in ts], z["scale"], cx=px, cy=py)
+        z.update(segment_id=piece["id"], segment_ids=[s["id"] for s in parts], position=[px, py],
+                 peak=[round(z["A"] / 1e6 + IN_S, 6), round(z["B"] / 1e6 - OUT_S - frame, 6)])
     # ---- SFX ----
     if focus:
         if sfx_track is None:
