@@ -366,8 +366,9 @@ def checks(cfg, d, tmap, vm: VoiceMap, words, chapters, expect_us):
             errs.append(f"обратный расчёт: {w['word']} {src / 1e6:.3f} vs {w['file_start']}")
     for c in chapters[1:]:
         if c.get("plate_delta_s") is None or abs(c["plate_delta_s"]) > 3.0:
-            notes.append(f"глава {c['n']} «{c['title']}» start {c['start']} — своей заставки нет "
-                         f"(ближайшая {c.get('plate')} @ {c.get('plate_start')}, Δ {c.get('plate_delta_s')} с)")
+            near = (f"ближайшая {c.get('plate')} @ {c.get('plate_start')}, Δ {c.get('plate_delta_s')} с"
+                    if c.get("plate_start") is not None else "текстовых плашек на таймлайне нет")
+            notes.append(f"глава {c['n']} «{c['title']}» start {c['start']} — своей заставки нет ({near})")
     missing = sorted({s["file"] for t in tracks for s in t["segments"]
                       if s["file"] and not s["file"].startswith("##_draftpath") and not os.path.exists(s["file"])})
     errs += [f"нет файла {f}" for f in missing]

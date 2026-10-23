@@ -194,6 +194,17 @@ def test_assemble_refuses_unsynced_pair(dump, cache):
     assert len(nested_of(d, outer_by_compound(d, comp["circle"]))["tracks"][-1]["segments"]) == 1  # sc1 only
 
 
+def test_assemble_refuses_dump_with_adjustment(dump):
+    import assemble
+    proj, cp = dump({"screencasts": ["sc1.mp4"], "camera": ["cam1.mp4"]}, [pair("sc1.mp4", "cam1.mp4")])
+    cfg = common.load_config(str(cp))
+    d = common.read_draft(cfg)
+    d["tracks"].append({"id": "adj", "type": "adjust", "segments": [
+        {"id": "a1", "material_id": "x", "target_timerange": {"start": 0, "duration": 2_000_000}}]})
+    with pytest.raises(SystemExit, match="Adjustment: 0.000–2.000"):
+        assemble.classify(cfg, d)
+
+
 def test_make_compound_refuses_camera_role():
     import make_compound
     with pytest.raises(SystemExit) as e:

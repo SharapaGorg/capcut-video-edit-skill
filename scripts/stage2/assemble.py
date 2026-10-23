@@ -148,6 +148,12 @@ def classify(cfg, draft: dict) -> dict[str, list]:
         raise NothingToAssemble("нет сырых сегментов скринкаста/голоса на верхнем уровне — проект уже собран?")
     if (cfg.compounds or {}).get("screencast"):
         raise NothingToAssemble(f"в config.json уже есть compounds: {cfg.compounds}")
+    adj = [(s["target_timerange"]["start"] / 1e6, seg_end(s) / 1e6) for t in draft["tracks"] if t["type"] == "adjust"
+           for s in t["segments"]]
+    if adj:   # assemble puts one block per F stretch itself; a leftover block would colour the camera twice
+        raise SystemExit("в свалке уже есть блоки Adjustment: " + ", ".join(f"{a:.3f}–{b:.3f} с" for a, b in adj)
+                         + ". Цвет ставит сборка (по одному блоку на участок F). Удалить эти блоки в CapCut "
+                           "(или в копии проекта) и запустить снова; ничего не записано.")
     return roles
 
 
