@@ -215,9 +215,13 @@ def test_build_overlap_zero_items_and_merge(make_project, tmp_path):
 
 def test_bbox_rules():
     import gfx_build
+    circ = {"cx": 1800.0, "cy": 812.0, "r": 160.0}
     s_card = {"type": "card", "layout": "S", "position": "top-right"}
-    assert gfx_build.bbox_problems(s_card, [1240, 110, 1800, 500], 1920, 1080) == []
-    assert any("кружк" in p for p in gfx_build.bbox_problems(s_card, [1240, 110, 1800, 900], 1920, 1080))
+    assert gfx_build.bbox_problems(s_card, [1240, 110, 1800, 500], 1920, 1080, circ) == []
+    assert any("кружк" in p for p in gfx_build.bbox_problems(s_card, [1240, 110, 1800, 900], 1920, 1080, circ))
+    low = {"type": "plate", "layout": "S", "position": "bottom-left"}
+    assert any("circle" in p for p in gfx_build.bbox_problems(low, [1000, 800, 1700, 900], 1920, 1080, circ))
+    assert gfx_build.bbox_problems(low, [1000, 800, 1600, 900], 1920, 1080, circ) == []   # left of the circle
     plate = {"type": "plate", "layout": "S", "position": "top-left"}
     assert any("90" in p for p in gfx_build.bbox_problems(plate, [20, 80, 600, 200], 1920, 1080))
     wall = {"type": "plate", "layout": "F", "position": "wall"}
@@ -355,3 +359,105 @@ def test_preview_composites_over_source_frame(make_project, tmp_path):
     wh = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(png)],
                         capture_output=True, text=True).stdout.strip()
     assert wh == f"{cfg.width},{cfg.height}"
+
+
+# ---------- fix round 1 ----------
+def test_circle_zone_from_the_project(make_project, tmp_path):
+    """The circle rule uses the project's circle: moved to the top left, a top-left plate is refused and the
+    bottom-right corner is free."""
+    import gfx_build
+    import render
+    cfg, _v, _sr = gfx_project(make_project, tmp_path)
+    c0 = gfx_build.project_circle(cfg)
+    assert abs(c0["cx"] - 1920 / 2 * 1.8) < 1 and abs(c0["cy"] - 540 * 1.68) < 1
+    d = common.read_draft(cfg)
+    leaf = d["materials"]["drafts"][0]["draft"]["tracks"][1]["segments"][0]
+    leaf["clip"]["transform"] = {"x": -0.8, "y": 0.68}
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    c = gfx_build.project_circle(cfg)
+    assert abs(c["cx"] - 192) < 1 and abs(c["cy"] - 172.8) < 1 and abs(c["r"] - 153.6) < 1
+    comps = build(cfg, ITEMS[:1])
+    mov = tmp_path / "x.mov"
+    e = render.entry(cfg, "p1", comps["p1"], mov, "yuva444p10le", [96, 80, 700, 300], circle=c)
+    assert any("кружк" in p for p in e["problems"]) and e["circle"] == [192.0, 172.8, 153.6]
+    corner = dict(comps["p1"], position="bottom-left")
+    assert not [p for p in gfx_build.bbox_problems(corner, [1500, 700, 1820, 1000], 1920, 1080, c) if "circle" in p]
+    assert [p for p in gfx_build.bbox_problems(corner, [1500, 700, 1820, 1000], 1920, 1080, c0) if "circle" in p]
+
+
+def test_apply_sfx_only_for_graphics_on_the_timeline(make_project, tmp_path):
+    import apply_graphics
+    import apply_sfx
+    cfg, _v, _sr = gfx_project(make_project, tmp_path)
+    comps = build(cfg, ITEMS)
+    fake_render(cfg, comps)
+    apply_graphics.run(cfg, only=["p1"], dry=False, guard_seconds=0)
+    out = apply_sfx.run(cfg, dry=False, guard_seconds=0)
+    assert [e["id"] for e in out["added"]] == ["p1"]
+    assert sorted(out["not_applied"]) == ["c1", "ch2", "sp1"]
+    d = common.read_draft(cfg)
+    assert sum(len(t["segments"]) for t in effects.sfx_tracks(d)) == 1
+
+
+def test_render_meta_written_after_each_composition(make_project, tmp_path, monkeypatch):
+    pytest.importorskip("playwright.sync_api")
+    import render
+    cfg, _v, _sr = gfx_project(make_project, tmp_path)
+    build(cfg, ITEMS[:1] + ITEMS[3:])
+    calls = []
+
+    def fake_comp(page, cfg_, comp, mov):
+        calls.append(mov.stem)
+        if len(calls) == 2:
+            raise BrokenPipeError("ffmpeg died")
+        mov.parent.mkdir(parents=True, exist_ok=True)
+        mov.write_bytes(b"stub")
+        return [96, 80, 700, 300], "Unbounded"
+    monkeypatch.setattr(render, "render_comp", fake_comp)
+    monkeypatch.setattr(render, "pix_fmt_of", lambda p: "yuva444p10le")
+    # an old record of the composition that fails must not survive (its MOV is being overwritten)
+    render.meta_path(cfg).write_text(json.dumps({"c1": {"sha": "old"}}), encoding="utf-8")
+    with pytest.raises(BrokenPipeError):
+        render.run(cfg, only=["p1", "c1"])
+    meta = render.read_meta(cfg)
+    assert set(meta) == {"p1"} and meta["p1"]["frames"] == 75
+
+
+def test_split_refuses_keys_on_a_nested_camera_leaf(make_project, tmp_path):
+    """Stage 6 push-in = keys on the camera leaf inside the F compound: a split over it is refused."""
+    import apply_graphics
+    cfg, _v, _sr = gfx_project(make_project, tmp_path)
+    d = common.read_draft(cfg)
+    cam = d["materials"]["videos"][1]["path"]
+    keys = [{"id": "K", "property_type": "KFTypeScaleX", "keyframe_list": [
+        {"id": "k1", "time_offset": 26 * S, "values": [1.0]}, {"id": "k2", "time_offset": 28 * S, "values": [1.1]}]}]
+    leaf = seg("FL", "MCAMn2", 0, 10 * S, 25 * S, volume=0.0, common_keyframes=keys)
+    d["materials"]["drafts"].append(compound("F0F0F0F0-0000-4000-8000-0000000000F0", "DMF", [leaf],
+                                             {"videos": [vmat("MCAMn2", cam)]}))
+    d["materials"]["videos"].append(vmat("MCOMPF", ""))
+    d["tracks"][1]["segments"] = [seg("F1", "MCOMPF", 20 * S, 10 * S, 0, refs=["DMF"], volume=0.0)]
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    comps = build(cfg, [ITEMS[1]])
+    fake_render(cfg, comps)
+    before = snapshot(cfg)
+    with pytest.raises(SystemExit, match="keyframes"):
+        apply_graphics.run(cfg, dry=False, guard_seconds=0)
+    assert snapshot(cfg) == before
+    # without the keys the same split goes through and cuts the compound
+    keys.clear()
+    d["materials"]["drafts"][-1]["draft"]["tracks"][1]["segments"][0]["common_keyframes"] = []
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    assert apply_graphics.run(cfg, dry=True)["added"] == ["sp1"]
+
+
+def test_style_weights_and_orange_labels():
+    css = (ROOT / "scripts/graphics/html/base.css").read_text(encoding="utf-8") +         (ROOT / "scripts/graphics/html/gfx.css").read_text(encoding="utf-8")
+    body = re.sub(r"@font-face\s*{[^}]*}", "", css)
+    weights = [int(w) for w in re.findall(r"font-weight:\s*(\d+)", body)]
+    assert weights and min(weights) >= 800, weights
+    for sel in (r"\.kicker", r"\.plate\.k"):
+        rule = re.search(sel + r"\s*{([^}]*)}", css).group(1)
+        assert "D46A40" not in rule.upper(), sel

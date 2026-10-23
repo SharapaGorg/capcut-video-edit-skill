@@ -3,7 +3,8 @@
     python -X utf8 scripts/graphics/apply_sfx.py --config config.json [--only ID ...] [--sfx FILE] [--dry]
 
 Events = graphics/comps.json "sfx" (gfx_build: the element's start; a split / camera number also its exit at
-end − 0.4 s). File: the item's "sfx" (a name in cfg.sfx_dir), else --sfx, else the first audio file in cfg.sfx_dir.
+end − 0.4 s) — only for graphics that are on the timeline (graphics_applied.json segment present, or a segment
+with their MOV); the rest -> warning, no SFX. File: the item's "sfx" (a name in cfg.sfx_dir), else --sfx, else the first audio file in cfg.sfx_dir.
 Level (references/graphics.md, «Уровни звука»): peak momentary loudness of the SFX = voice − 12 LU (voice measured
 on the timeline ±5 s around the event, effects.voice_lufs); chapter cards 3 dB quieter (voice − 15 LU). No voice
 there -> the median voice level of the other events. cfg.sfx_dir unset -> stop and ask for it. An SFX already
@@ -22,10 +23,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common  # noqa: E402
 import effects  # noqa: E402
+import apply_graphics  # noqa: E402
 import gfx_build  # noqa: E402
+import render  # noqa: E402
 
 CHAPTER_DB = -3.0          # chapter cards: 3 dB quieter than the zoom SFX
 VOICE_WIN = 5.0
+
+
+def on_timeline(cfg, d: dict) -> set:
+    """Graphics ids really on the timeline: their graphics_applied.json segment exists, or a segment plays their MOV."""
+    seg_ids = {s["id"] for t in d["tracks"] for s in t["segments"]}
+    rec = apply_graphics.read_applied(cfg)["items"]
+    out = {cid for cid, r in rec.items() if r.get("segment_id") in seg_ids}
+    ix = common.index(d["materials"])
+    paths = {common._norm(common.mat_path(ix, s)) for t in d["tracks"] for s in t["segments"]
+             if s.get("material_id") in ix and ix[s["material_id"]][0] == "videos"}
+    out |= {cid for cid, m in render.read_meta(cfg).items() if common._norm(m["file"]) in paths}
+    return out
 
 
 def applied_path(cfg) -> Path:
@@ -42,6 +57,11 @@ def run(cfg, only=None, sfx: str | None = None, dry: bool = False, guard_seconds
         raise SystemExit(f"нет в comps.json: {unknown}")
     default = effects.sfx_files(cfg, [sfx] if sfx else None, n=1)[0]
     d = common.read_draft(cfg)
+    placed = on_timeline(cfg, d)
+    missing = [i for i in ids if i not in placed]
+    if missing:
+        log(f"  warning: not on the timeline (apply_graphics refused or not run) — no SFX for: {missing}")
+    ids = [i for i in ids if i in placed]
     fps = cfg.fps
     ap = applied_path(cfg)
     rec = json.loads(ap.read_text(encoding="utf-8")) if ap.is_file() else {"events": {}}
@@ -59,7 +79,7 @@ def run(cfg, only=None, sfx: str | None = None, dry: bool = False, guard_seconds
                 skipped.append(key)
                 continue
             events.append({"id": cid, "key": key, "kind": e["kind"], "t_us": t_us, "file": f})
-    out = {"added": [], "skipped": skipped}
+    out = {"added": [], "skipped": skipped, "not_applied": missing}
     if not events:
         log(f"nothing new: {len(skipped)} SFX already there")
         return out

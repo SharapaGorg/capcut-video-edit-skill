@@ -246,15 +246,48 @@ def sfx_events(it) -> list[dict]:
 
 
 # ---------- geometry after the render ----------
-def bbox_problems(comp: dict, bbox, w: int, h: int) -> list[str]:
-    """Placement rules on the drawn box [x0, y0, x1, y1] (px, union over the frames)."""
+CIRCLE_MARGIN = 12          # px kept free around the camera circle
+
+
+def template_circle(cfg) -> dict:
+    """Camera circle of assets/templates/mask_circle.json (clip + mask config): {cx, cy, r, sx, tx, ty} canvas px."""
+    import effects
+    tpl = effects.load_template("mask_circle")
+    clip, m = tpl["clip"], tpl["material"]["config"]
+    sx, tx, ty = float(clip["scale"]["x"]), float(clip["transform"]["x"]), float(clip["transform"]["y"])
+    W, H = cfg.width, cfg.height
+    return {"cx": W / 2 * (1 + tx) + m["centerX"] * W * sx, "cy": H / 2 * (1 - ty) - m["centerY"] * H * sx,
+            "r": m["width"] * W * sx / 2, "sx": sx, "tx": tx, "ty": ty}
+
+
+def project_circle(cfg, d: dict | None = None) -> dict:
+    """The camera circle of the project (stage6/check_zooms.circle_clip: the circle piece's clip transform × scale ×
+    mask config), else the template's. Read-only."""
+    for sub in ("stage6", "layout", "stage2"):
+        p = str(Path(__file__).resolve().parent.parent / sub)
+        if p not in sys.path:
+            sys.path.insert(1, p)
+    import check_zooms
+    try:
+        c = check_zooms.circle_clip(cfg, d if d is not None else common.read_draft(cfg))
+    except (OSError, ValueError, KeyError):
+        c = None
+    return c or template_circle(cfg)
+
+
+def bbox_problems(comp: dict, bbox, w: int, h: int, circle: dict | None = None) -> list[str]:
+    """Placement rules on the drawn box [x0, y0, x1, y1] (px, union over the frames). circle = {cx, cy, r} of the
+    project's camera circle (project_circle); None -> no circle (a video without the camera)."""
     if not bbox:
         return ["nothing visible in the composition"]
     kx, ky = w / 1920, h / 1080
     x0, y0, x1, y1 = bbox
     out = []
-    if comp["layout"] == "S" and x1 > 1480 * kx and y1 > 640 * ky:
-        out.append(f"bbox {bbox} enters the camera circle zone (зона кружка, x > {1480 * kx:.0f}, y > {640 * ky:.0f})")
+    if comp["layout"] == "S" and circle:
+        nx, ny = min(max(circle["cx"], x0), x1), min(max(circle["cy"], y0), y1)
+        if ((nx - circle["cx"]) ** 2 + (ny - circle["cy"]) ** 2) ** 0.5 < circle["r"] + CIRCLE_MARGIN:
+            out.append(f"bbox {bbox} enters the camera circle (зона кружка: centre {circle['cx']:.0f}, "
+                       f"{circle['cy']:.0f}, r {circle['r']:.0f} + {CIRCLE_MARGIN})")
     if comp.get("panel"):
         if x1 > w / 2 + 2:
             out.append(f"bbox {bbox}: the split panel is wider than the left half")

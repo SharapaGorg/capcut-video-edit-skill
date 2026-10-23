@@ -7,7 +7,8 @@ Playwright Chromium, transparent background: every frame = window.seek(frame / f
 round(start·fps) (the MOV lands on frame boundaries of the timeline). The project must be 16:9 (the HTML is a
 1920×1080 page; another size = device scale factor). Writes <work_dir>/graphics/out/<id>.mov and merges
 <work_dir>/graphics/render_meta.json {id: {file, html, sha, start, end, start_us, end_us, frames, duration, fps,
-pix_fmt, bbox, font, problems}}; problems = placement rules on the drawn box (gfx_build.bbox_problems) and a font
+pix_fmt, bbox, font, circle, problems}} after EVERY composition (a failure later in the batch keeps the done ones);
+problems = placement rules on the drawn box (gfx_build.bbox_problems, against the project's camera circle) and a font
 that did not load — apply_graphics refuses such items. Long batches: run in the background.
 """
 from __future__ import annotations
@@ -38,14 +39,28 @@ def read_meta(cfg) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
 
 
+def _save_meta(cfg, cid: str, rec: dict | None) -> None:
+    meta = read_meta(cfg)
+    if rec is None:
+        if cid not in meta:
+            return
+        meta.pop(cid)
+    else:
+        meta[cid] = rec
+    meta_path(cfg).parent.mkdir(parents=True, exist_ok=True)
+    meta_path(cfg).write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def frames_of(cfg, comp) -> tuple[int, int]:
     return int(round(comp["start"] * cfg.fps)), int(round(comp["end"] * cfg.fps))
 
 
-def entry(cfg, cid: str, comp: dict, mov: Path, pix_fmt: str, bbox, font: str = "Unbounded") -> dict:
-    """The render_meta.json record of one composition."""
+def entry(cfg, cid: str, comp: dict, mov: Path, pix_fmt: str, bbox, font: str = "Unbounded",
+          circle: dict | None = None) -> dict:
+    """The render_meta.json record of one composition. circle: the project's camera circle (default: the template's)."""
     f0, f1 = frames_of(cfg, comp)
-    problems = gfx_build.bbox_problems(comp, bbox, cfg.width, cfg.height)
+    circle = circle or gfx_build.template_circle(cfg)
+    problems = gfx_build.bbox_problems(comp, bbox, cfg.width, cfg.height, circle)
     if font != "Unbounded":
         problems.append(f"font Unbounded did not load ({font}): check assets/Unbounded-var.ttf")
     if "yuva" not in pix_fmt and "argb" not in pix_fmt:
@@ -53,7 +68,8 @@ def entry(cfg, cid: str, comp: dict, mov: Path, pix_fmt: str, bbox, font: str = 
     return {"file": Path(mov).as_posix(), "html": comp["html"], "sha": comp["sha"], "start": comp["start"],
             "end": comp["end"], "start_us": common.snap(comp["start"], cfg.fps), "end_us": common.snap(comp["end"], cfg.fps),
             "frames": f1 - f0, "duration": round((f1 - f0) / cfg.fps, 6), "fps": cfg.fps, "pix_fmt": pix_fmt,
-            "bbox": list(bbox) if bbox else None, "font": font, "problems": problems}
+            "bbox": list(bbox) if bbox else None, "font": font,
+            "circle": [round(circle["cx"], 1), round(circle["cy"], 1), round(circle["r"], 1)], "problems": problems}
 
 
 def pix_fmt_of(path) -> str:
@@ -115,7 +131,8 @@ def run(cfg, only=None, log=print) -> dict:
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise SystemExit(f"Playwright не установлен: {INSTALL}")
-    meta = read_meta(cfg)
+    circle = gfx_build.project_circle(cfg)
+    log(f"camera circle: centre {circle['cx']:.0f}, {circle['cy']:.0f}, r {circle['r']:.0f}")
     done = {}
     out_dir = cfg.work_dir / "graphics" / "out"
     with sync_playwright() as pw:
@@ -123,19 +140,21 @@ def run(cfg, only=None, log=print) -> dict:
             browser = pw.chromium.launch()
         except Exception as e:                      # browser binaries missing
             raise SystemExit(f"Chromium для Playwright не запускается ({str(e).splitlines()[0]}): {INSTALL}")
-        page = browser.new_page(viewport={"width": PAGE_W, "height": PAGE_H}, device_scale_factor=cfg.width / PAGE_W)
-        for cid in ids:
-            c = comps[cid]
-            mov = out_dir / f"{cid}.mov"
-            t0 = time.time()
-            box, font = render_comp(page, cfg, c, mov)
-            done[cid] = entry(cfg, cid, c, mov, pix_fmt_of(mov), box, font)
-            meta[cid] = done[cid]
-            m = done[cid]
-            log(f"  {cid}: {m['frames']} frames, {m['duration']:.3f} s, {m['pix_fmt']}, bbox {m['bbox']}, "
-                f"{time.time() - t0:.1f} s -> {mov.name}" + (f"  PROBLEMS: {m['problems']}" if m["problems"] else ""))
-        browser.close()
-    meta_path(cfg).write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+        try:
+            page = browser.new_page(viewport={"width": PAGE_W, "height": PAGE_H},
+                                    device_scale_factor=cfg.width / PAGE_W)
+            for cid in ids:
+                c = comps[cid]
+                mov = out_dir / f"{cid}.mov"
+                t0 = time.time()
+                _save_meta(cfg, cid, None)              # the MOV is being overwritten: its old record is void
+                box, font = render_comp(page, cfg, c, mov)
+                m = done[cid] = entry(cfg, cid, c, mov, pix_fmt_of(mov), box, font, circle)
+                _save_meta(cfg, cid, m)                 # after every composition: a later failure keeps these
+                log(f"  {cid}: {m['frames']} frames, {m['duration']:.3f} s, {m['pix_fmt']}, bbox {m['bbox']}, "
+                    f"{time.time() - t0:.1f} s -> {mov.name}" + (f"  PROBLEMS: {m['problems']}" if m["problems"] else ""))
+        finally:
+            browser.close()
     bad = [k for k, v in done.items() if v["problems"]]
     log("VALIDATION:", "OK" if not bad else f"FAIL ({bad}: fix the item or the HTML, re-run gfx_build + render)")
     return done

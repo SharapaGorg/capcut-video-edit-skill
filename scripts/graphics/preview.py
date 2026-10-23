@@ -21,11 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-for _sub in ("stage6", "layout", "stage2"):
-    sys.path.insert(1, str(Path(__file__).resolve().parent.parent / _sub))
-import check_zooms  # noqa: E402
 import common  # noqa: E402
-import effects  # noqa: E402
 import gfx_build  # noqa: E402
 import render  # noqa: E402
 
@@ -60,16 +56,7 @@ def background_plan(cfg, pieces, rows, t: float, circle: dict | None = None, shi
     if lay == "F":
         return {"layout": "F", "base": source_at(pieces, "camera", t_us), "shift": shift, "circle": None}
     return {"layout": "S", "base": source_at(pieces, "screencast", t_us), "shift": 0.0,
-            "circle": source_at(pieces, "camera", t_us), "geom": circle or template_circle(cfg)}
-
-
-def template_circle(cfg) -> dict:
-    tpl = effects.load_template("mask_circle")
-    clip, m = tpl["clip"], tpl["material"]["config"]
-    sx, tx, ty = float(clip["scale"]["x"]), float(clip["transform"]["x"]), float(clip["transform"]["y"])
-    W, H = cfg.width, cfg.height
-    return {"cx": W / 2 * (1 + tx) + m["centerX"] * W * sx, "cy": H / 2 * (1 - ty) - m["centerY"] * H * sx,
-            "r": m["width"] * W * sx / 2, "sx": sx, "tx": tx, "ty": ty}
+            "circle": source_at(pieces, "camera", t_us), "geom": circle or gfx_build.template_circle(cfg)}
 
 
 def compose(cfg, plan: dict, fg: Path, out: Path) -> Path:
@@ -114,7 +101,7 @@ def run(cfg, cid: str, times=None, log=print) -> list[Path]:
     D = c["end"] - c["start"]
     ts = [float(x) for x in times] if times else [round(c["start"] + D * k, 3) for k in (0.25, 0.5, 0.85)]
     pieces, rows = map_pieces(cfg), common.read_layout(cfg)
-    circle = check_zooms.circle_clip(cfg, common.read_draft(cfg))
+    circle = gfx_build.project_circle(cfg)
     shift = 0.0
     if c.get("panel"):
         import apply_graphics
@@ -139,7 +126,7 @@ def run(cfg, cid: str, times=None, log=print) -> list[Path]:
             box = [int(round(v * cfg.width / render.PAGE_W)) for v in bb] if bb else None
             out = cfg.work_dir / "graphics" / "preview" / f"{cid}_{t:.2f}.png"
             compose(cfg, background_plan(cfg, pieces, rows, t, circle, shift), fg, out)
-            probs = gfx_build.bbox_problems(c, box, cfg.width, cfg.height) if box else []
+            probs = gfx_build.bbox_problems(c, box, cfg.width, cfg.height, circle) if box else []
             log(f"  {cid} t={t:.2f}: bbox {box} -> {out}" + (f"  PROBLEMS: {probs}" if probs else ""))
             outs.append(out)
         b.close()

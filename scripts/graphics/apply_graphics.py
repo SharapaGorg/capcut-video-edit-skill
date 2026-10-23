@@ -10,7 +10,8 @@ Track «Графика» (video, overlay flag 2): above every screencast / full-
 camera circle — created there on the first run. MOV = video material has_audio false, full frame, volume 0.
 Split (and a number on the camera): the full-screen camera piece under it is cut at the split edges and moved right
 (Position X 0 -> +0.3 -> 0 = source 35–85 % of the width in the right half; slide 400 ms in and out), like CapCut.
-Writes both drafts, the media entries in draft_meta_info, graphics/graphics_applied.json. Never adds texts.
+Keys on that camera (the segment itself or a leaf inside its compound: a stage 6 push-in) -> refused: remove them or
+move the split. Writes both drafts, the media entries in draft_meta_info, graphics/graphics_applied.json. Never adds texts.
 """
 from __future__ import annotations
 
@@ -72,11 +73,34 @@ def camera_host(cfg, d: dict, a: int, b: int) -> tuple[dict, dict]:
     return t, host[0]
 
 
+def _nested_segments(d: dict):
+    """Every segment of every nested draft (compounds at any depth)."""
+    stack = [m.get("draft") for m in d.get("materials", {}).get("drafts", []) or [] if isinstance(m, dict)]
+    while stack:
+        nd = stack.pop()
+        if not isinstance(nd, dict):
+            continue
+        for t in nd.get("tracks", []):
+            yield from t.get("segments", [])
+        stack += [m.get("draft") for m in nd.get("materials", {}).get("drafts", []) or [] if isinstance(m, dict)]
+
+
+def keyed_leaves(cfg, d: dict, ti: int, a: int, b: int) -> list[str]:
+    """Leaves of top-level track ti shown in [a, b) (inside compounds too) that carry keyframes — e.g. a stage 6
+    push-in on the camera leaf inside the F compound."""
+    ids = {p["segment_id"] for p in common.flatten(cfg, d, None)
+           if p["track"] == ti and p["compound"] and p["start"] < b and p["end"] > a}
+    return sorted({s["id"] for s in _nested_segments(d) if s.get("id") in ids and s.get("common_keyframes")})
+
+
 def shift_camera(cfg, d: dict, a: int, b: int) -> str:
-    """Cut the camera at a, b and slide the middle piece right (400 ms in/out). Returns its segment id."""
+    """Cut the camera at a, b and slide the middle piece right (400 ms in/out). Returns its segment id.
+    Keys on the camera there (top-level segment or a leaf inside its compound, e.g. a stage 6 push-in) -> ValueError."""
     t, host = camera_host(cfg, d, a, b)
-    if host.get("common_keyframes"):
-        raise ValueError(f"the camera segment under {a / 1e6:.2f}–{b / 1e6:.2f} has keyframes (push-in?) — "
+    nested = keyed_leaves(cfg, d, d["tracks"].index(t), a, b)
+    if host.get("common_keyframes") or nested:
+        where = "the camera segment" if host.get("common_keyframes") else f"camera pieces inside its compound {nested}"
+        raise ValueError(f"{where} under {a / 1e6:.2f}–{b / 1e6:.2f} has keyframes (push-in, stage 6?) — "
                          "remove them or move the split")
     common.split_at(d, t, [a, b])
     piece = next(s for s in t["segments"] if s["target_timerange"]["start"] == a)
