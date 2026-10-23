@@ -219,3 +219,22 @@ def test_init_rerun_merges_config(tmp_path):
     _init(src, proj, "--force")
     new = json.loads(cp.read_text(encoding="utf-8"))
     assert new["compounds"]["mic"] is None and new["master_render"] is None
+
+
+def test_backup_skips_resources_and_prerenders(proj):
+    """I8: the backup keeps the drafts, Timelines/, subdraft/, draft_meta_info; not Resources/ nor *.aac."""
+    p, cp = proj
+    (p / "Resources" / "combination").mkdir(parents=True)
+    (p / "Resources" / "combination" / "X_audio.aac").write_bytes(b"0" * 1000)
+    (p / "subdraft" / "N1").mkdir(parents=True)
+    (p / "subdraft" / "N1" / "sub_draft_config.json").write_text("{}", encoding="utf-8")
+    (p / "subdraft" / "N1" / "stray_audio.aac").write_bytes(b"0")
+    (p / "matting").mkdir()
+    (p / "matting" / "m.bin").write_bytes(b"0")
+    (p / "template-2.tmp").write_bytes(b"0")
+    cfg = common.load_config(str(cp))
+    b = common.backup(cfg, "s")
+    names = {x.relative_to(b).as_posix() for x in b.rglob("*")}
+    assert "Resources" not in names and "matting" not in names and not any(n.endswith((".aac", ".tmp")) for n in names)
+    assert {"draft_content.json", "draft_meta_info.json", "subdraft/N1/sub_draft_config.json"} <= names
+    assert any(n.startswith("Timelines/") and n.endswith("draft_content.json") for n in names)

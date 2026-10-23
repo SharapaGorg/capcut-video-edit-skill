@@ -151,14 +151,35 @@ def ensure_capcut_closed() -> None:
     raise RuntimeError("CapCut.exe is still running after Stop-Process; close it and retry")
 
 
+BACKUP_SKIP_DIRS = {"resources", "matting", "smart_crop", ".cache", "cache"}   # top level of the project, any case
+BACKUP_SKIP_FILES = ("*.aac", "*.tmp")
+
+
+def _backup_ignore(root: Path):
+    """copytree ignore: CapCut caches CapCut rebuilds itself (Resources/ with the compound pre-renders, matting/,
+    smart_crop/, cache dirs) at the top level, *.aac / *.tmp anywhere."""
+    import fnmatch
+
+    def ign(d, names):
+        top = Path(d).resolve() == root
+        return {n for n in names if (top and n.lower() in BACKUP_SKIP_DIRS and (Path(d) / n).is_dir())
+                or any(fnmatch.fnmatch(n.lower(), pat) for pat in BACKUP_SKIP_FILES)}
+    return ign
+
+
 def backup(cfg: Config, stage: str) -> Path:
+    """Copy of the project dir into <work_dir>/backups/<stage>-before-<stamp>: drafts, Timelines/, subdraft/,
+    draft_meta_info and the rest — WITHOUT Resources/ (pre-renders, may be hundreds of MB), matting/, smart_crop/,
+    cache dirs, *.aac, *.tmp (CapCut rebuilds them). Restore (CapCut killed): copy the backup over the project dir
+    keeping its Resources/, then clear audio_path in every subdraft/*/sub_draft_config.json whose .aac is missing
+    (CapCut renders it again) — references/rules.md «Правила»."""
     base = cfg.work_dir / "backups" / f"{stage}-before-{time.strftime('%Y%m%d-%H%M%S')}"
     base.parent.mkdir(parents=True, exist_ok=True)
     dst, n = base, 1
     while dst.exists():
         n += 1
         dst = base.with_name(f"{base.name}-{n}")
-    shutil.copytree(cfg.project_dir, dst)
+    shutil.copytree(cfg.project_dir, dst, ignore=_backup_ignore(Path(cfg.project_dir).resolve()))
     return dst
 
 
