@@ -1,0 +1,51 @@
+/* Shorts 1080x1920, style «Монолит» (as scripts/graphics/html/base.css, gfx.css): white text, accent #D46A40, plate #0A0A0A */
+@font-face { font-family: 'Unbounded'; src: url('../../assets/Unbounded-var.ttf') format('truetype'); font-weight: 200 900; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body { width: 1080px; height: 1920px; overflow: hidden; position: relative; font-family: 'Unbounded', sans-serif; -webkit-font-smoothing: antialiased; color: #FFFFFF; }
+.abs { position: absolute; }
+.plate { display: inline-block; background: #0A0A0A; color: #FFFFFF; font-weight: 800; line-height: 1; white-space: nowrap; text-transform: uppercase; }
+.plate.w { background: #FFFFFF; color: #0A0A0A; }
+.plate.o { background: #D46A40; color: #0A0A0A; }
+.or { color: #D46A40; }
+[data-in] { will-change: transform, opacity; }
+
+/* Субтитры: по центру, на границе камера/скринкаст */
+.cap { position: absolute; left: 0; width: 1080px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.cap.dyn .plate { font-size: 50px; }
+.cap .plate { font-size: 44px; padding: 16px 26px 20px; letter-spacing: -.01em; max-width: 960px; white-space: normal; text-align: center; line-height: 1.1; }
+
+/* Хук: крупная плашка в верхней трети (над камерой) */
+.hook { position: absolute; left: 60px; top: 380px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.hook .plate { font-size: 60px; padding: 20px 28px 26px; letter-spacing: -.02em; white-space: normal; max-width: 960px; line-height: 1.05; }
+.hook .kicker { background: #0A0A0A; color: #D46A40; font-weight: 700; font-size: 24px; letter-spacing: .12em; text-transform: uppercase; padding: 12px 20px 14px; }
+
+/* Карточка-список: поверх скринкаста (нижняя половина) */
+.card { position: absolute; left: 60px; top: 920px; width: 960px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.card .plate { font-size: 40px; padding: 16px 24px 20px; white-space: normal; line-height: 1.1; }
+.card .row { display: flex; align-items: center; gap: 10px; }
+.card .n { width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; background: #D46A40; color: #0A0A0A; font-weight: 900; font-size: 40px; flex: none; }
+.card .n.w { background: #FFFFFF; }
+.card .row .plate { font-size: 34px; padding: 0 22px; height: 84px; display: flex; align-items: center; }
+.card .num { background: #0A0A0A; color: #D46A40; font-weight: 900; font-size: 120px; line-height: 1; letter-spacing: -.04em; padding: 20px 30px 26px; display: inline-block; }
+.card .arrow { width: 60px; height: 84px; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .arrow svg { width: 44px; height: 44px; stroke: #FFFFFF; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.card .hrow { display: flex; align-items: center; gap: 10px; }
+.card .sq { width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; background: #FFFFFF; color: #0A0A0A; font-weight: 900; font-size: 52px; flex: none; }
+.card .sq.o { background: #D46A40; }
+.dim { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; background: rgba(10,10,10,.72); }
+
+/* Концовка */
+.end { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.end .plate { font-size: 52px; padding: 20px 30px 26px; }
+.end .kicker { background: #0A0A0A; color: #D46A40; font-weight: 700; font-size: 26px; letter-spacing: .12em; text-transform: uppercase; padding: 12px 20px 14px; }
+.end.reels { gap: 14px; }
+.end.reels .plate { font-size: 56px; padding: 22px 32px 28px; }
+.end.reels .plate.w { font-size: 56px; padding: 22px 32px 28px; }
+.end.reels .plate.w:nth-child(3) { margin-top: 18px; }
+
+
+/* Тикток: превью YouTube + плашки */
+.end.tiktok { gap: 24px; }
+.end.tiktok .yt { width: 960px; height: auto; display: block; border: 6px solid #FFFFFF; }
+.end.tiktok .plate { font-size: 48px; padding: 20px 30px 26px; }
+.end.tiktok .plate { white-space: normal; max-width: 960px; text-align: center; line-height: 1.1; }

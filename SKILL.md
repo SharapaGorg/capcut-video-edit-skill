@@ -31,11 +31,13 @@ description: Монтаж ролика — монтаж длинного YouTube
   "sfx_dir": "...", "music_dir": "...",
   "description_md": "<ролик>/description.md",
   "master_render": "<экспорт мастера, для шортсов>",
-  "TIKTOK_CHANNEL": null
+  "tiktok_channel": null, "tiktok_thumbnail": null, "reels_word": null,
+  "master_maps": null
 }
 ```
 - `compounds` заполняет этап 2 §7 после сборки.
 - `sfx_dir`, `music_dir` неизвестны → спросить один раз.
+- Короткие (shorts.md): `tiktok_channel` / `tiktok_thumbnail` — концовка TikTok, `reels_word` — кодовое слово рилса, `master_maps` — карты таймлайна мастера, если он доделан в копии проекта (по умолчанию `stage3`).
 - Рабочая папка: `transcript/`, `stage1/` … `stage12_shorts/`, `backups/`, `PROGRESS.md`.
 
 ## Порядок

@@ -42,6 +42,9 @@ def main(argv=None):
         "master_render": None,
         "work_dir": str(work),
         "tiktok_channel": None,
+        "tiktok_thumbnail": None,
+        "reels_word": None,
+        "master_maps": None,
         "tessdata": None,
     }
     cp = work / "config.json"

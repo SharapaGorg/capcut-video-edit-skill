@@ -38,6 +38,9 @@ class Config:
     master_render: str | None = None
     work_dir: Path = Path(".")
     tiktok_channel: str | None = None
+    tiktok_thumbnail: str | None = None   # screenshot of the long video in YouTube search (TikTok end card), optional
+    reels_word: str | None = None         # Reels CTA code word (spec "code_word" overrides)
+    master_maps: str | None = None        # maps of the timeline master_render came from; None = <work_dir>/stage3
     description_md: str | None = None
     tessdata: str | None = None      # folder with rus/eng.traineddata if the tesseract install lacks rus
     config_path: Path | None = None
@@ -71,6 +74,9 @@ def load_config(path: str | None = None) -> Config:
         master_render=raw.get("master_render"),
         work_dir=Path(raw["work_dir"]) if raw.get("work_dir") else p.resolve().parent,
         tiktok_channel=raw.get("tiktok_channel"),
+        tiktok_thumbnail=raw.get("tiktok_thumbnail"),
+        reels_word=raw.get("reels_word"),
+        master_maps=raw.get("master_maps"),
         description_md=raw.get("description_md"),
         tessdata=raw.get("tessdata"),
         config_path=p.resolve(),
