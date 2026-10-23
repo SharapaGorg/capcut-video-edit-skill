@@ -267,32 +267,59 @@ def pcm(path, start: float = 0.0, dur: float | None = None, sr: int = SR):
     return np.frombuffer(out.stdout, dtype=np.float32).copy()
 
 
-def loudness(samples, sr: int = SR) -> dict:
-    """EBU R128 of mono float32 samples: {"I": integrated LUFS, "M_max": max momentary (400 ms) LUFS}.
-    Padded with 0.5 s of silence, so a sound shorter than 400 ms has an M. -70 = silence."""
+def _ebur128(samples, sr: int) -> str:
+    """ffmpeg ebur128 framelog (stderr) of mono float32 samples padded with 0.5 s of silence."""
     import numpy as np
     x = np.concatenate([np.asarray(samples, dtype=np.float32), np.zeros(int(0.5 * sr), np.float32)])
     with tempfile.TemporaryDirectory() as tmp:
         f = Path(tmp) / "a.f32"
         x.tofile(f)
-        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-f", "f32le", "-ar", str(sr), "-ac", "1",
-                              "-i", str(f), "-af", "ebur128=framelog=info", "-f", "null", "-"],
-                             capture_output=True, text=True).stderr
+        return subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-f", "f32le", "-ar", str(sr), "-ac", "1",
+                               "-i", str(f), "-af", "ebur128=framelog=info", "-f", "null", "-"],
+                              capture_output=True, text=True).stderr
+
+
+def loudness(samples, sr: int = SR) -> dict:
+    """EBU R128 of mono float32 samples: {"I": integrated LUFS, "M_max": max momentary (400 ms) LUFS}.
+    Padded with 0.5 s of silence, so a sound shorter than 400 ms has an M. -70 = silence."""
+    err = _ebur128(samples, sr)
     ms = [float(v) for v in re.findall(r"\bM:\s*(-?[\d.]+)", err)]
     summ = err[err.rfind("Summary:"):] if "Summary:" in err else err
     m = re.search(r"I:\s*(-?[\d.]+) LUFS", summ)
     return {"I": float(m.group(1)) if m else -70.0, "M_max": max(ms) if ms else -70.0}
 
 
-def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | None:
-    """Integrated loudness of the voice heard on the timeline in [a_us, b_us): voice and screencast leaf pieces
-    with volume > 0 at speed 1 (sped voice is muted), each x its volume (compound chain included). None if there
-    is no voice there."""
+def short_term(samples, sr: int = SR):
+    """Short-term (3 s window) loudness every 100 ms: (T, S) numpy arrays; T = window END time, s; S = LUFS
+    (-inf for silence)."""
+    import numpy as np
+    err = _ebur128(samples, sr)
+    rows = re.findall(r"\bt:\s*([\d.]+)\s+TARGET.*?\bS:\s*(-?[\d.]+|-inf|nan)", err)
+    T = np.array([float(a) for a, _ in rows])
+    S = np.array([float(b) if b not in ("-inf", "nan") else -np.inf for _, b in rows])
+    n = len(samples) / sr
+    keep = T <= n + 1e-6
+    return T[keep], S[keep]
+
+
+def encode(samples, out, sr: int = SR, args=()) -> Path:
+    """Write mono float32 samples to an audio file (format by extension; extra ffmpeg args e.g. -b:a 160k)."""
+    import numpy as np
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-", *args, str(out)],
+                   input=np.asarray(samples, dtype=np.float32).tobytes(), check=True)
+    return out
+
+
+def voice_pcm(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR, roles=("voice", "screencast")):
+    """The voice heard on the timeline in [a_us, b_us) as mono samples: leaf pieces of the given roles with volume > 0
+    at speed 1 (sped voice is muted), each x its volume (compound chain included). -> (samples, got_any)."""
     import numpy as np
     n = int(round((b_us - a_us) * sr / 1e6))
     buf = np.zeros(n, np.float32)
     got = False
-    for p in common.flatten(cfg, draft, ("voice", "screencast")):
+    for p in common.flatten(cfg, draft, roles):
         if (p["volume"] <= 0 or abs(p["speed"] - 1.0) > 1e-6 or p["src"] is None
                 or p["end"] <= a_us or p["start"] >= b_us):
             continue
@@ -302,6 +329,13 @@ def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | 
         a = a[: max(0, n - i0)]
         buf[i0:i0 + len(a)] += a
         got = got or len(a) > 0
+    return buf, got
+
+
+def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | None:
+    """Integrated loudness of the voice heard on the timeline in [a_us, b_us) (voice_pcm). None if there is no
+    voice there."""
+    buf, got = voice_pcm(cfg, draft, a_us, b_us, sr)
     if not got:
         return None
     lu = loudness(buf, sr)["I"]
