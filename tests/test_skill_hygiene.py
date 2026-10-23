@@ -125,3 +125,24 @@ def test_every_script_has_dry_and_config(script):
                        encoding="utf-8", cwd=str(script.parent), timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
     assert "--dry" in r.stdout and "--config" in r.stdout, r.stdout
+
+
+def test_local_overlap_checks_use_common():
+    """add_camera / apply_cuts / stage2 apply / make_compound validate overlaps through common.overlap_errors."""
+    sys.path.insert(0, str(SCRIPTS)); sys.path.insert(1, str(SCRIPTS / "stage2"))
+    import common
+    import make_compound
+
+    def sg(a, b):
+        return {"id": f"s{a}", "material_id": "m", "target_timerange": {"start": a, "duration": b - a}}
+    tr = {"type": "video", "segments": [sg(0, 10), sg(5, 20)]}
+    assert common.overlap_errors(tr, "track 0") == ["overlap on track 0 at 0.000"]
+    assert common.overlap_errors({"type": "video", "segments": [sg(0, 10), sg(9, 20)]}, "x") == []   # 1 us rounding
+    c = make_compound.Compound(nid="n", cid="c", name="cmp", kind="main",
+                               nested={"duration": 20, "tracks": [tr]}, outer={})
+    errs = make_compound.errors({"materials": {}, "tracks": []}, [c])
+    assert any("overlap on cmp (inside)" in e for e in errs), errs
+    for f in ("layout/add_camera.py", "stage1/apply_cuts.py", "stage2/apply.py", "stage2/make_compound.py"):
+        src = (SCRIPTS / f).read_text(encoding="utf-8")
+        assert "overlap_errors" in src or "draft_overlaps" in src, f
+        assert 'q["target_timerange"]["start"] + 1' not in src, f

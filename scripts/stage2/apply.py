@@ -265,14 +265,12 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     # ---------- validation ----------
     errs = common.check_refs(d)
     for ti, t in enumerate(d["tracks"]):
-        segs = by_start(t["segments"])
-        errs += [f"overlap track {ti} at {seg_end(p) / 1e6:.3f}" for p, q in zip(segs, segs[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+        errs += common.overlap_errors(t, f"track {ti}")
         if common.gap_count(t) > gaps0[t["id"]]:
             errs.append(f"track {ti}: new holes ({gaps0[t['id']]} -> {common.gap_count(t)})")
         if t["type"] in ("video", "audio"):
             errs += [f"short segment track {ti} at {s['target_timerange']['start'] / 1e6:.3f} "
-                     f"({s['target_timerange']['duration'] / 1e3:.0f} ms)" for s in segs
+                     f"({s['target_timerange']['duration'] / 1e3:.0f} ms)" for s in t["segments"]
                      if s["target_timerange"]["duration"] < MIN_SEG_US - 1 and s["id"] not in pre_short]
     expected = old_dur - sum(b - a for a, b, _ in cuts) - sum((b - a) - comp for a, b, comp, _ in speeds)
     if abs(expected - d["duration"]) > 1:

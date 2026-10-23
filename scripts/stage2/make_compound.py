@@ -311,9 +311,7 @@ def errors(draft: dict, comps: list[Compound]) -> list[str]:
         segs = by_start(c.nested["tracks"][-1]["segments"])
         if segs[0]["target_timerange"]["start"] != 0 or max(seg_end(s) for s in segs) != c.nested["duration"]:
             errs.append(f"{c.name}: nested range != duration")
-        for p, q in zip(segs, segs[1:]):
-            if seg_end(p) > q["target_timerange"]["start"] + 1:
-                errs.append(f"{c.name}: overlap inside at {seg_end(p) / 1e6:.3f}")
+        errs += common.overlap_errors(c.nested["tracks"][-1], f"{c.name} (inside)")
     return errs
 
 

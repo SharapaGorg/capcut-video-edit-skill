@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import common  # noqa: E402
-from common import by_start, seg_end  # noqa: E402
+from common import seg_end  # noqa: E402
 
 
 def approved_cuts(s1: Path, fps: int) -> list[dict]:
@@ -54,9 +54,7 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     total = sum(c["end_us"] - c["start_us"] for c in cuts if c["start_us"] < old)
     errs = common.check_refs(d)
     for ti, t in enumerate(d["tracks"]):
-        segs = by_start(t["segments"])
-        errs += [f"overlap track {ti} at {seg_end(p) / 1e6:.3f}" for p, q in zip(segs, segs[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+        errs += common.overlap_errors(t, f"track {ti}")
         if common.gap_count(t) > gaps0[ti]:
             errs.append(f"track {ti}: new holes ({gaps0[ti]} -> {common.gap_count(t)})")
     end = max((seg_end(s) for t in d["tracks"] for s in t["segments"]), default=0)

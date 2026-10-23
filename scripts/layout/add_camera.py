@@ -126,10 +126,7 @@ def main(argv=None):
         raise SystemExit(str(e))
     print(res)
     errs = common.check_refs(d)
-    for t in d["tracks"]:
-        segs = by_start(t["segments"])
-        errs += [f"overlap on track {t.get('name') or t['type']}" for p, q in zip(segs, segs[1:])
-                 if seg_end(p) > q["target_timerange"]["start"] + 1]
+    errs += common.draft_overlaps(d)
     print("VALIDATION:", "OK" if not errs else "FAIL", *errs, sep="\n  ")
     if errs:
         raise SystemExit(1)
