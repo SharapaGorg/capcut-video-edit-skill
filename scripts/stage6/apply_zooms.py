@@ -325,8 +325,11 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
         out["punchin"].append({"n": p["n"], "type": "punchin", "start": la / 1e6, "scale": PUNCH_SCALE,
                                "segment_id": leaf["id"], "compound": nid})
     errs += common.check_refs(d) + common.draft_overlaps(d)
-    errs += [f"keys outside the segment {sid}" for sid, s in common.all_segments(d).items()
-             if not effects.keyframes_inside(s)]
+    try:
+        errs += [f"keys outside the segment {sid}" for sid, s in common.all_segments(d).items()
+                 if not effects.keyframes_inside(s)]
+    except ValueError as e:   # duplicate ids: the check (and zooms.json segment ids) would be ambiguous
+        errs.append(str(e))
     out["focus"] = [{k: v for k, v in z.items() if k not in ("A", "B")} | {"type": "focus", "start_us": z["A"],
                                                                            "end_us": z["B"], "in_ms": int(IN_S * 1000),
                                                                            "out_ms": int(OUT_S * 1000)} for z in focus]

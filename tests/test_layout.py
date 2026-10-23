@@ -628,3 +628,67 @@ def test_focus_zoom_keys_on_leaf_inside_screencast_compound(make_project, tmp_pa
     assert [r["problems"] for r in reps] == [[], []]
     with pytest.raises(SystemExit):        # applied twice -> refused (keys on the leaf)
         apply_zooms.run(cfg, spec, dry=True)
+
+
+def _sc_compound_project(make_project, tmp_path):
+    """zoom_project with the screencast as a compound (inner cut at 7 s) + its subdraft folder."""
+    cfg, spec, _v, _sr = zoom_project(make_project, tmp_path)
+    d = common.read_draft(cfg)
+    sc = d["materials"]["videos"][0]["path"]
+    nested = compound(NID_SC, "DM2", [seg("SL", "MSCn", 0, 7 * S, 0), seg("SL2", "MSCn", 7 * S, 13 * S, 8 * S)],
+                      {"videos": [vmat("MSCn", sc)]})
+    d["materials"]["drafts"] = [nested]
+    d["materials"]["videos"].append(vmat("MCOMP", ""))
+    d["tracks"][0]["segments"] = [seg("SCO", "MCOMP", 0, 20 * S, 0, refs=["DM2"])]
+    sd = cfg.project_dir / "subdraft" / NID_SC
+    sd.mkdir(parents=True)
+    (sd / "draft_content.json").write_text(json.dumps({"duration": 20 * S, "tracks": [], "materials": {"drafts": [
+        {"id": "W", "draft": {}}]}}), encoding="utf-8")
+    return cfg, spec, d
+
+
+def _inner_ids(d):
+    return [[s["id"] for t in m["draft"]["tracks"] for s in t["segments"]] for m in d["materials"]["drafts"]]
+
+
+def test_zoom_after_outer_split_resolves_its_own_leaf(make_project, tmp_path):
+    """Reviewer's scenario: the screencast compound cut at 15 s (ripple / hook / CapCut) before zoom 5–9 s ->
+    the copy got fresh inner ids (as CapCut: no inner id shared between copies), check_zooms finds the keys."""
+    import apply_zooms
+    import check_zooms
+    cfg, spec, d = _sc_compound_project(make_project, tmp_path)
+    common.split_at(d, d["tracks"][0], [15 * S])
+    a, b = _inner_ids(d)
+    assert not set(a) & set(b) and not common.duplicate_segment_ids(d)
+    jx = [common.index(m["draft"]["materials"]) for m in d["materials"]["drafts"]]
+    for m, ix in zip(d["materials"]["drafts"], jx):   # refs inside each copy resolve inside that copy
+        assert all(s["material_id"] in ix for t in m["draft"]["tracks"] for s in t["segments"])
+    assert not set(jx[0]) & set(jx[1])
+    assert not common.check_refs(d)
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    apply_zooms.run(cfg, spec, dry=False, guard_seconds=0)
+    reps = check_zooms.run(cfg, frames=False)
+    assert [r["problems"] for r in reps] == [[]]
+
+
+def test_ripple_and_hook_clone_inner_ids_fresh(make_project, tmp_path):
+    import apply_hook
+    cfg, _spec, d = _sc_compound_project(make_project, tmp_path)
+    r = __import__("copy").deepcopy(d)
+    common.ripple(r, [(10 * S, 11 * S)])
+    ids = _inner_ids(r)
+    assert len(ids) == 2 and not set(ids[0]) & set(ids[1]) and not common.duplicate_segment_ids(r)
+    for p in (cfg.project_dir / "draft_content.json", cfg.project_dir / "Timelines" / TID / "draft_content.json"):
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    write_words(cfg, words(("раз", 10.2, 10.6)))
+    apply_hook.run(cfg, [(10.0, 13.0)], dry=False, guard_seconds=0, maps=False)
+    h = common.read_draft(cfg)
+    ids = _inner_ids(h)
+    assert len(ids) == 2 and not set(ids[0]) & set(ids[1]) and not common.duplicate_segment_ids(h)
+    assert ids[0] == ["SL", "SL2"]                 # the original keeps its ids
+    # an old-style copy (inner ids not renewed) is refused, never first-wins
+    bad = __import__("copy").deepcopy(d)
+    bad["materials"]["drafts"].append(__import__("copy").deepcopy(bad["materials"]["drafts"][0]))
+    with pytest.raises(ValueError, match="duplicate segment ids"):
+        common.all_segments(bad)

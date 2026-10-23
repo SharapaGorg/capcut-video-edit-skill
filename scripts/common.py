@@ -348,15 +348,35 @@ def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -
     return sorted(out, key=lambda x: x["start"])
 
 
+def duplicate_segment_ids(draft: dict) -> set:
+    """Segment ids that occur more than once in the draft + nested drafts (an older split copied a nested draft
+    without renewing its inner ids)."""
+    seen, dup = set(), set()
+    stack = [draft]
+    while stack:
+        d = stack.pop()
+        for t in d.get("tracks", []):
+            for s in t.get("segments", []):
+                (dup if s.get("id") in seen else seen).add(s.get("id"))
+        stack += [m["draft"] for m in d.get("materials", {}).get("drafts", []) or []
+                  if isinstance(m, dict) and isinstance(m.get("draft"), dict)]
+    return dup
+
+
 def all_segments(draft: dict) -> dict:
-    """segment id -> segment for every segment of the draft and of every nested draft (any depth)."""
+    """segment id -> segment for every segment of the draft and of every nested draft (any depth). Duplicate ids
+    (duplicate_segment_ids) are ambiguous: ValueError naming them, never first-wins."""
+    dup = duplicate_segment_ids(draft)
+    if dup:
+        raise ValueError(f"duplicate segment ids in nested drafts ({len(dup)}, e.g. {sorted(dup)[:3]}): a nested draft "
+                         "copied without fresh inner ids — re-split the compound in CapCut or restore a backup")
     out = {}
     stack = [draft]
     while stack:
         d = stack.pop()
         for t in d.get("tracks", []):
             for s in t.get("segments", []):
-                out.setdefault(s.get("id"), s)
+                out[s.get("id")] = s
         stack += [m["draft"] for m in d.get("materials", {}).get("drafts", []) or []
                   if isinstance(m, dict) and isinstance(m.get("draft"), dict)]
     return out
@@ -466,10 +486,49 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
     return rec
 
 
+def renew_ids(nd: dict) -> dict:
+    """Every "id" defined inside the nested draft nd (the draft itself, tracks, segments, materials, keyframes) ->
+    a fresh id, and every string equal to one of them (material_id, extra_material_refs, keyframe_refs, …) remapped.
+    As CapCut's split copy: on a real project the 13 copies of one compound share NO segment / material / track id.
+    Refs to ids not defined inside (a drafts material of an ancestor) stay as they are. Mutates and returns nd."""
+    ids = {}
+
+    def collect(o):
+        if isinstance(o, dict):
+            if isinstance(o.get("id"), str) and o["id"]:
+                ids.setdefault(o["id"], new_id())
+            for v in o.values():
+                collect(v)
+        elif isinstance(o, list):
+            for v in o:
+                collect(v)
+
+    def remap(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if isinstance(v, str):
+                    if v in ids:
+                        o[k] = ids[v]
+                else:
+                    remap(v)
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                if isinstance(v, str):
+                    if v in ids:
+                        o[i] = ids[v]
+                else:
+                    remap(v)
+
+    collect(nd)
+    remap(nd)
+    return nd
+
+
 class _Cloner:
     """Fresh copies of materials for a split piece, as CapCut split does: a compound piece gets its own copy of the
-    nested draft with a FRESH nested draft id, but keeps the combination_id and the draft_*_path of the original
-    (all pieces share the original subdraft/<id>/ folder — seen on a real project: 45 drafts entries, 11 folders).
+    nested draft with FRESH ids for the draft and everything inside it (renew_ids), but keeps the combination_id and
+    the draft_*_path of the original (all pieces share the original subdraft/<id>/ folder — seen on a real project:
+    45 drafts entries, 11 folders, no inner id shared between copies).
     Refs not in the index are kept as they are. self.drafts: [(original nested id, cloned drafts entry)]."""
 
     def __init__(self, draft: dict):
@@ -485,7 +544,7 @@ class _Cloner:
         c["id"] = new_id()
         if k == "drafts" and isinstance(c.get("draft"), dict):
             old = c["draft"].get("id")
-            c["draft"]["id"] = new_id()
+            renew_ids(c["draft"])
             self.drafts.append((old, c))
         self.mats[k].append(c)
         self.byid[c["id"]] = (k, c)

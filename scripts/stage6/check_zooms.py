@@ -107,7 +107,10 @@ def run(cfg, frames: bool = True) -> list[dict]:
     zj = json.loads(zp.read_text(encoding="utf-8"))
     d = common.read_draft(cfg)
     W, H = cfg.width, cfg.height
-    segs = common.all_segments(d)   # focus keys sit on the screencast leaf, also inside its compound
+    try:
+        segs = common.all_segments(d)   # focus keys sit on the screencast leaf, also inside its compound
+    except ValueError as e:
+        raise SystemExit(f"check_zooms: {e}")
     circle = circle_geometry(cfg, d)
     out = cfg.work_dir / "stage6" / "check"
     out.mkdir(parents=True, exist_ok=True)

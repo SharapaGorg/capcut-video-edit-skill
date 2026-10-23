@@ -8,8 +8,9 @@ hook.json: the approved variant (hook_proposal.md), pieces in CURRENT timeline s
 (stage3/transcript_timeline.json).
 For every track, the segments under the piece are copied to the hook position on the same track, clipped to the
 piece, as CapCut copy/split does (common.clone_piece: own material + extras — voice effects, Adjust, mask stay;
-a compound piece keeps pointing at the same nested draft, like a compound CapCut cut into pieces). The originals stay
-where they were, shifted by the hook length together with everything else (nested drafts untouched). Then: draft_meta_info tm_duration, stage4/hook_applied.json, layout.json
+a compound piece gets its own copy of the nested draft with fresh ids inside, sharing the original's subdraft folder
+and combination_id, like a compound CapCut cut into pieces). The originals stay where they were, shifted by the hook
+length together with everything else (their nested drafts untouched). Then: draft_meta_info tm_duration, stage4/hook_applied.json, layout.json
 shifted with the hook rows in front, and STAGE_3 steps 1–4 (build_maps.run) — unless --no-maps.
 Refused (nothing written): hook > 30 s; first word later than 0.5 s from the start; no transcript_timeline.
 The ending (last 20 s: full-screen camera, no overlays; a leaf under a full-screen camera on a higher track, like the
