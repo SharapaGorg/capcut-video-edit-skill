@@ -11,8 +11,10 @@ piece, as CapCut copy/split does (common.clone_piece: own material + extras — 
 a compound piece keeps pointing at the same nested draft, like a compound CapCut cut into pieces). The originals stay
 where they were, shifted by the hook length together with everything else (nested drafts untouched). Then: draft_meta_info tm_duration, stage4/hook_applied.json, layout.json
 shifted with the hook rows in front, and STAGE_3 steps 1–4 (build_maps.run) — unless --no-maps.
-Refused (nothing written): hook > 30 s; first word later than 0.5 s from the start; no transcript_timeline;
-after the insert the last 20 s not full-screen camera or with overlays (STAGE_4 ending: end screen).
+Refused (nothing written): hook > 30 s; first word later than 0.5 s from the start; no transcript_timeline.
+The ending (last 20 s: full-screen camera, no overlays; a leaf under a full-screen camera on a higher track, like the
+circle under F, is not an overlay; call to action in the speech) is a REPORT line, never a refusal (STAGE_4:
+«сообщить, не растягивать»); it goes into the output and stage4/hook_applied.json "ending".
 A second run is refused (stage4/hook_applied.json exists) unless --force.
 """
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -100,21 +103,43 @@ def first_word_s(words: list[dict], pieces: list[tuple[int, int]]) -> float | No
     return None
 
 
-def ending_errors(cfg, d: dict) -> list[str]:
-    """STAGE_4 ending: the last END_S seconds = camera on full screen, no overlays (circle, graphics, texts,
-    stickers, effects — leaves without a source role, except audio and Adjustment)."""
+CTA_RE = re.compile(r"подпис|ссылк|лайк|коммент|колокол", re.I)
+
+
+def ending_report(cfg, d: dict, words: list[dict] | None = None) -> dict:
+    """STAGE_4 ending, a REPORT (never a refusal: «заключение короче 20 с → сообщить, не растягивать»): the last
+    END_S seconds should be camera on full screen without overlays (graphics, texts, stickers, effects — leaves
+    without a source role except audio and Adjustment — or a masked camera piece). A leaf covered by a full-screen
+    camera piece on a HIGHER track (e.g. the circle under F, as apply_layout leaves it) is not an overlay.
+    words: timeline words (call to action looked up in the last END_S s). -> {"ok", "notes": [str]}."""
     b = d["duration"]
     a = max(0, b - common.us(END_S))
     tol = int(1e6 / cfg.fps)
-    errs = [f"ending: no full-screen camera at {x / 1e6:.3f}–{y / 1e6:.3f}"
-            for x, y in common.subtract_ranges(a, b, common.full_camera_ranges(cfg, d)) if y - x > tol]
-    over = sorted({(p["name"] or p["kind"] or "?") for p in common.flatten(cfg, d, None)
-                   if p["start"] < b - tol and p["end"] > a + tol
-                   and ((p["role"] is None and p["kind"] not in ("audios", "placeholders"))
-                        or (p["role"] == "camera" and p["mask"]))})
+    notes = []
+    if b < common.us(END_S):
+        notes.append(f"ролик {b / 1e6:.1f} с короче {END_S:.0f} с")
+    notes += [f"нет камеры на весь экран {x / 1e6:.3f}–{y / 1e6:.3f}"
+              for x, y in common.subtract_ranges(a, b, common.full_camera_ranges(cfg, d)) if y - x > tol]
+    flat = common.flatten(cfg, d, None)
+    full = [p for p in flat if p["role"] == "camera" and not p["mask"]]
+    over = set()
+    for p in flat:
+        x, y = max(p["start"], a), min(p["end"], b)
+        if y - x <= tol:
+            continue
+        if not ((p["role"] is None and p["kind"] not in ("audios", "placeholders")) or (p["role"] == "camera" and p["mask"])):
+            continue
+        above = common.merge_ranges([(f["start"], f["end"]) for f in full if f["track"] > p["track"]], tol)
+        if any(v - u > tol for u, v in common.subtract_ranges(x, y, above)):
+            over.add(p["name"] or p["kind"] or "?")
     if over:
-        errs.append(f"ending: overlays in the last {END_S:.0f} s: {', '.join(over)[:200]}")
-    return errs
+        notes.append(f"оверлеи в последних {END_S:.0f} с: {', '.join(sorted(over))[:200]}")
+    if words is not None:
+        tail = [w for w in words if w["end"] > a / 1e6]
+        cta = [w["word"] for w in tail if CTA_RE.search(w["word"])]
+        notes.append(f"призыв в последних {END_S:.0f} с: " + (f"«{' '.join(cta[:5])}»" if cta else "не найден"))
+    ok = not any(n.startswith(("ролик", "нет камеры", "оверлеи")) for n in notes)
+    return {"ok": ok, "notes": notes}
 
 
 def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: bool = True,
@@ -146,7 +171,8 @@ def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: b
     if errs:
         raise SystemExit("хук не применён:\n  - " + "\n  - ".join(errs))
     new, L = build(cfg, d, pieces)
-    errs = validate(cfg, d, orig, new, L) + ending_errors(cfg, d)
+    errs = validate(cfg, d, orig, new, L)
+    ending = ending_report(cfg, d, [dict(w, start=w["start"] + L / 1e6, end=w["end"] + L / 1e6) for w in words])
     text = " ".join(w["word"] for a, b in pieces for w in words if a / 1e6 - 1e-6 <= w["start"] and w["end"] <= b / 1e6 + 1e-6)
     ix = common.index(d["materials"])
     segs = [{"track": d["tracks"][ti].get("name") or f"{d['tracks'][ti]['type']}#{ti}", "segment_id": n["id"],
@@ -162,9 +188,13 @@ def run(cfg, pieces_s: list[tuple], dry: bool, guard_seconds: float = 5, maps: b
     print("VALIDATION:", "OK" if not errs else "FAIL")
     for e in errs:
         print("  -", e)
+    print(f"ending (last {END_S:.0f} s, report only — STAGE_4: сообщить, не растягивать): "
+          + ("full-screen camera, no overlays" if ending["ok"] else "NOT ready for the YouTube end screen"))
+    for n in ending["notes"]:
+        print("  ending:", n)
     if errs:
         raise SystemExit(1)
-    out = {"variant": variant, "pieces_us": [[a, b] for a, b in pieces], "hook_len_us": L, "shift_us": L, "text": text,
+    out = {"variant": variant, "ending": ending, "pieces_us": [[a, b] for a, b in pieces], "hook_len_us": L, "shift_us": L, "text": text,
            "duration_before_us": dur0, "duration_after_us": d["duration"], "hook_segments": segs}
     if dry:
         print("dry run, not written")

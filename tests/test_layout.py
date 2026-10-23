@@ -268,8 +268,8 @@ def test_hook_copies_pieces_to_start_and_shifts_everything(make_project, tmp_pat
     assert json.loads((cfg.project_dir / "draft_meta_info.json").read_text())["tm_duration"] == 63 * S
 
 
-def test_hook_refusals(make_project, tmp_path):
-    """STAGE_4 checks are failures, not notes: hook > 30 s, first word > 0.5 s, ending without full-screen camera."""
+def test_hook_refusals(make_project, tmp_path, capsys):
+    """STAGE_4 checks: hook > 30 s and first word > 0.5 s are failures; the ending is only reported."""
     import apply_hook
     cfg = make_project(hook_draft(tmp_path))
     with pytest.raises(SystemExit, match="transcript_timeline"):
@@ -280,11 +280,37 @@ def test_hook_refusals(make_project, tmp_path):
     with pytest.raises(SystemExit, match="first word"):
         apply_hook.run(cfg, [(10.0, 13.0)], dry=True)          # first word 1.0 s into the hook
     assert apply_hook.run(cfg, [(10.6, 13.0)], dry=True)["hook_len_us"] == int(2.4 * S)
-    cfg2 = make_project(hook_draft(tmp_path, ending_f=False))   # the circle runs to the end
+    cfg2 = make_project(hook_draft(tmp_path, ending_f=False))   # the circle runs to the end, no F: reported only
     write_words(cfg2, words(("раз", 10.2, 10.6)))
-    with pytest.raises(SystemExit) as e:
-        apply_hook.run(cfg2, [(10.0, 13.0)], dry=True)
-    assert e.value.code == 1
+    capsys.readouterr()
+    res = apply_hook.run(cfg2, [(10.0, 13.0)], dry=True)
+    assert res["ending"]["ok"] is False
+    out = capsys.readouterr().out
+    assert "NOT ready for the YouTube end screen" in out and "нет камеры на весь экран" in out
+    assert "оверлеи" in out and "призыв в последних 20 с: не найден" in out
+
+
+def test_hook_applied_over_layout_f_ending(make_project, tmp_path, capsys):
+    """A normally laid-out video: apply_layout puts F over the circle at the end, the circle stays underneath —
+    the circle is not an overlay there, the hook is applied and the report says the ending is ready."""
+    import apply_hook
+    import apply_layout
+    cfg = make_project(layout_draft(tmp_path), compounds={"circle": NID_CIRCLE, "cam_full": [], "mic": None,
+                                                          "screencast": None},
+                       layout=[{"start": 20.0, "end": 30.0, "layout": "F"}])
+    write_words(cfg, words(("Смотрите", 10.2, 10.6), ("подписывайтесь", 55.0, 55.8)))
+    apply_layout.run(cfg, [(40.0, None)], dry=False, guard_seconds=0)
+    d = common.read_draft(cfg)
+    assert any(p["mask"] and p["end"] == 60 * S for p in common.flatten(cfg, d, ("camera",)))  # circle under F
+    capsys.readouterr()
+    res = apply_hook.run(cfg, [(10.0, 13.0)], dry=False, guard_seconds=0, maps=False)
+    out = capsys.readouterr().out
+    assert res["ending"]["ok"] is True, res["ending"]
+    assert "ending (last 20 s, report only" in out and "full-screen camera, no overlays" in out
+    assert "«подписывайтесь»" in out
+    assert common.read_draft(cfg)["duration"] == 63 * S
+    log = json.loads((cfg.work_dir / "stage4" / "hook_applied.json").read_text(encoding="utf-8"))
+    assert log["ending"]["ok"] is True
 
 
 def test_layout_cut_and_insert():
