@@ -69,7 +69,7 @@ def add(cfg, draft: dict, camera: str, pairs: list[dict], cache_root=None) -> di
         if not pr:
             continue
         seg = {"target_timerange": {"start": p["start"]}, "source_timerange": {"start": p["src"]}, "speed": p["speed"]}
-        for a, b in assemble._subtract(p["start"], p["start"] + p["dur"], blocked):
+        for a, b in common.subtract_ranges(p["start"], p["start"] + p["dur"], blocked):
             pc = assemble._cam_piece(seg, a, b, int(pr["offset_us"]), cam_dur, cfg.fps)
             if pc:
                 pieces.append(pc)
@@ -109,6 +109,11 @@ def main(argv=None):
     ap.add_argument("--resync", action="store_true")
     a = ap.parse_args(argv)
     cfg = common.load_config(a.config)
+    if not cfg.sources.get("camera"):
+        raise SystemExit("cfg.sources.camera is empty: no camera folder for this video")
+    if not (cfg.compounds or {}).get("circle"):
+        print("no circle compound yet (cfg.compounds.circle empty): run stage2/assemble.py first; nothing to do")
+        return
     if not (Path(cfg.sources["camera"]) / a.camera).is_file():
         raise SystemExit(f"not found: {Path(cfg.sources['camera']) / a.camera}")
     pairs = pairs_for(cfg, a.camera, a.resync)

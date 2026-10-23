@@ -40,30 +40,13 @@ def approved_cuts(s1: Path, fps: int) -> list[dict]:
     return [c for c in out if c["end_us"] > c["start_us"]]
 
 
-def gaps(track) -> int:
-    segs = by_start(track["segments"])
-    return sum(1 for p, q in zip(segs, segs[1:]) if q["target_timerange"]["start"] - seg_end(p) > 1)
-
-
 def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
     """Remove [a, b) ranges (timeline us) from every track, shift the rest left. Returns per-piece records."""
     mats = draft["materials"]
     byid = index(mats)
 
     def new_t(t):
-        return t - sum(min(b, t) - a for a, b in cuts if a < t)
-
-    def kept(a, b):
-        out, cur = [], a
-        for x, y in cuts:
-            if y <= cur or x >= b:
-                continue
-            if x > cur:
-                out.append((cur, x))
-            cur = max(cur, y)
-        if cur < b:
-            out.append((cur, b))
-        return out
+        return common.map_through_cuts(t, cuts)
 
     def clone(mid):
         k, m = byid[mid]
@@ -78,7 +61,7 @@ def ripple(draft: dict, cuts: list[tuple[int, int]]) -> list[dict]:
         segs = []
         for s in by_start(t["segments"]):
             a, b = s["target_timerange"]["start"], seg_end(s)
-            parts = kept(a, b)
+            parts = common.subtract_ranges(a, b, cuts)
             if not parts:
                 rec.append({"track": ti, "segment_id": s["id"], "old_start_us": a, "old_end_us": b, "removed": True})
                 continue
@@ -106,7 +89,7 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     cuts = approved_cuts(s1, cfg.fps)
     d = common.read_draft(cfg)
     orig = copy.deepcopy(d)
-    gaps0 = [gaps(t) for t in d["tracks"]]
+    gaps0 = [common.gap_count(t) for t in d["tracks"]]
     old = d["duration"]
     rec = ripple(d, [(c["start_us"], c["end_us"]) for c in cuts])
     total = sum(c["end_us"] - c["start_us"] for c in cuts if c["start_us"] < old)
@@ -115,8 +98,8 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
         segs = by_start(t["segments"])
         errs += [f"overlap track {ti} at {seg_end(p) / 1e6:.3f}" for p, q in zip(segs, segs[1:])
                  if seg_end(p) > q["target_timerange"]["start"] + 1]
-        if gaps(t) > gaps0[ti]:
-            errs.append(f"track {ti}: new holes ({gaps0[ti]} -> {gaps(t)})")
+        if common.gap_count(t) > gaps0[ti]:
+            errs.append(f"track {ti}: new holes ({gaps0[ti]} -> {common.gap_count(t)})")
     end = max((seg_end(s) for t in d["tracks"] for s in t["segments"]), default=0)
     if end > d["duration"] + 1:
         errs.append(f"segments end at {end} after duration {d['duration']}")

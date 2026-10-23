@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "layout"))
 import common  # noqa: E402
 import effects  # noqa: E402
 import make_compound as mc  # noqa: E402
-from common import by_start, index, new_id, seg_end, source_role, us  # noqa: E402
+from common import by_start, index, new_id, seg_end, source_role, subtract_ranges, us  # noqa: E402
 
 MIC_GAIN = 10 ** (4.5 / 20)
 CNEW = Path(__file__).resolve().parent.parent.parent / "templates" / "capcut_new" / "templates.json"
@@ -42,19 +42,6 @@ NAMES = {"circle": "Кружок камеры", "screencast": "Скринкас�
 
 class NothingToAssemble(RuntimeError):
     pass
-
-
-def _subtract(a, b, cuts):
-    out, cur = [], a
-    for x, y in cuts:
-        if y <= cur or x >= b:
-            continue
-        if x > cur:
-            out.append((cur, x))
-        cur = max(cur, y)
-    if cur < b:
-        out.append((cur, b))
-    return out
 
 
 def _intersect(a, b, ranges):
@@ -93,6 +80,8 @@ class _Parts:
         """Video material of a camera file: the dump's one, else from the template + ffprobe (not in the draft)."""
         if name not in self.dump_cams:
             from capcut_new_project import probe
+            if not self.cfg.sources.get("camera"):
+                raise SystemExit(f"camera file {name} is in assembly.json, but cfg.sources.camera is empty")
             path = Path(self.cfg.sources["camera"]) / name
             info = probe(path)
             m = copy.deepcopy(self.T["video"])
@@ -173,8 +162,10 @@ def classify(cfg, draft: dict) -> dict[str, list]:
     return roles
 
 
-def assemble(cfg, draft: dict, pairs: list[dict], f_ranges: list[tuple[int, int]], cache_root=None, log=print) -> dict:
-    """Mutates draft. Returns {"compounds": cfg.compounds dict, "made": [Compound], "f": [(a, b)], "report": {...}}."""
+def assemble(cfg, draft: dict, pairs: list[dict], f_ranges: list[tuple[int, int]], cache_root=None, log=print,
+             allow_unsynced: bool = False) -> dict:
+    """Mutates draft. A voice file without an ok sync pair while camera files exist -> SystemExit (nothing written),
+    unless allow_unsynced (then that part simply gets no camera). Returns {"compounds": cfg.compounds dict, "made": [Compound], "f": [(a, b)], "report": {...}}."""
     mats = draft["materials"]
     ix = index(mats)
     roles = classify(cfg, draft)
@@ -220,13 +211,22 @@ def assemble(cfg, draft: dict, pairs: list[dict], f_ranges: list[tuple[int, int]
             if kind == "voice":
                 spans = [((ts, te), False)]
             else:
-                spans = [(r, True) for r in _subtract(ts, te, f_ranges)] + [(r, False) for r in _intersect(ts, te, f_ranges)]
+                spans = [(r, True) for r in subtract_ranges(ts, te, f_ranges)] + [(r, False) for r in _intersect(ts, te, f_ranges)]
             for (a, b), is_circle in spans:
                 pc = _cam_piece(s, a, b, int(p["offset_us"]), parts.base(p["camera"])["duration"], fps)
                 if pc:
                     (circle if is_circle else fpieces).append((p["camera"],) + pc)
-    for n in sorted(unsynced):
-        log(f"warning: {n}: нет синхрона с камерой (assembly.json) — камеры над ним не будет")
+    if unsynced:
+        from capcut_new_project import list_media
+        info = {p["voice"]: p for p in pairs}
+        lines = [f"  {n}: " + (f"camera {info[n].get('camera')}, offset {info[n].get('offset_us', 0) / 1e6:+.3f} s, "
+                                f"z {info[n].get('z')}, within_frame {info[n].get('within_frame')} -> not ok"
+                                if n in info else "no pair in assembly.json") for n in sorted(unsynced)]
+        if list_media(cfg.sources.get("camera")) and not allow_unsynced:
+            raise SystemExit("нет синхрона с камерой (layout/assembly.json):\n" + "\n".join(lines) +
+                             "\nпроверить пары (layout/xcorr.py --force) или --allow-unsynced (эти куски без камеры)")
+        for line in lines:
+            log("warning: no camera over" + line)
 
     made, comp = [], {"mic": None, "cam_full": [], "screencast": None, "circle": None}
     pos = draft["tracks"].index(main) + 1 if main is not None else 0
@@ -335,11 +335,12 @@ def get_pairs(cfg, resync: bool, log=print) -> list[dict]:
     return xcorr.sync_sources(cfg, log=log)
 
 
-def run(cfg, dry: bool, cache_root=None, guard_seconds: float = 5, resync: bool = False, log=print) -> dict:
+def run(cfg, dry: bool, cache_root=None, guard_seconds: float = 5, resync: bool = False, log=print,
+        allow_unsynced: bool = False) -> dict:
     draft = common.read_draft(cfg)
     classify(cfg, draft)  # before the (slow) sync
     pairs = get_pairs(cfg, resync, log)
-    res = assemble(cfg, draft, pairs, layout_f(cfg), cache_root=cache_root, log=log)
+    res = assemble(cfg, draft, pairs, layout_f(cfg), cache_root=cache_root, log=log, allow_unsynced=allow_unsynced)
     errs = validate(draft, res)
     for c in res["made"]:
         log(f"{c.name}: {c.n} segments -> compound {c.nid}, {c.outer['target_timerange']['start'] / 1e6:.3f}"
@@ -374,10 +375,12 @@ def main(argv=None):
     ap.add_argument("--config", default="config.json")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--resync", action="store_true", help="recompute camera sync (layout/xcorr.py)")
+    ap.add_argument("--allow-unsynced", action="store_true",
+                    help="assemble even if some voice files have no camera sync (they get no camera)")
     a = ap.parse_args(argv)
     cfg = common.load_config(a.config)
     try:
-        run(cfg, a.dry, resync=a.resync)
+        run(cfg, a.dry, resync=a.resync, allow_unsynced=a.allow_unsynced)
     except NothingToAssemble as e:
         print(f"nothing to assemble: {e}")
     except effects.EffectCacheMissing as e:

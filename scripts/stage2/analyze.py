@@ -63,8 +63,7 @@ class Screen:
         self.mask = m
 
     def t1(self, t):  # transcript s -> timeline us
-        us = t * 1e6
-        return us - sum(min(b, us) - a for a, b in self.cuts1 if a < us)
+        return common.map_through_cuts(t * 1e6, self.cuts1)
 
     def piece(self, t):
         if any(a <= t * 1e6 < b for a, b in self.cuts1):
@@ -118,16 +117,7 @@ def analyze(cfg, dry: bool = False) -> list[dict]:
         return any(a <= t < b for a, b in CUTS1)
 
     def kept_parts(a, b):
-        out, cur = [], a
-        for x, y in CUTS1:
-            if y <= cur or x >= b:
-                continue
-            if x > cur:
-                out.append((cur, x))
-            cur = max(cur, y)
-        if cur < b:
-            out.append((cur, b))
-        return out
+        return common.subtract_ranges(a, b, CUTS1)
 
     def kept_len(a, b):
         return sum(y - x for x, y in kept_parts(a, b))

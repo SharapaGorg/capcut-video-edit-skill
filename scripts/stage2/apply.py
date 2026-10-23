@@ -29,11 +29,6 @@ MARGIN_US = 80_000
 CUT_CATS = ("pause", "hesitation", "filler", "noise", "service")
 
 
-def gaps(track) -> int:
-    segs = by_start(track["segments"])
-    return sum(1 for p, q in zip(segs, segs[1:]) if q["target_timerange"]["start"] - seg_end(p) > 1)
-
-
 def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     wd = cfg.work_dir
     FRAME_US = 1_000_000 / cfg.fps
@@ -51,7 +46,7 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     CUTS1 = sorted((c["start_us"], c["end_us"]) for c in A["cuts"])
 
     def t1(x):  # transcript us -> timeline (after stage 1) us
-        return x - sum(min(b, x) - a for a, b in CUTS1 if a < x)
+        return common.map_through_cuts(x, CUTS1)
 
     def inv1(x):  # timeline (after stage 1) -> transcript us
         out = x
@@ -99,7 +94,7 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
     av = [t for t in d["tracks"] if t["type"] in ("video", "audio")]
     bounds = sorted({x for t in av for s in t["segments"] for x in (s["target_timerange"]["start"], seg_end(s))})
     pre_short = {s["id"] for t in d["tracks"] for s in t["segments"] if s["target_timerange"]["duration"] < MIN_SEG_US}
-    gaps0 = {t["id"]: gaps(t) for t in d["tracks"]}
+    gaps0 = {t["id"]: common.gap_count(t) for t in d["tracks"]}
 
     T = json.loads((wd / "transcript" / "transcript.json").read_text(encoding="utf-8"))
     W = sorted((int(w["start"] * 1e6), int(w["end"] * 1e6)) for s in T["segments"] for w in s["words"])
@@ -273,8 +268,8 @@ def run(cfg, dry: bool, guard_seconds: float = 5) -> dict:
         segs = by_start(t["segments"])
         errs += [f"overlap track {ti} at {seg_end(p) / 1e6:.3f}" for p, q in zip(segs, segs[1:])
                  if seg_end(p) > q["target_timerange"]["start"] + 1]
-        if gaps(t) > gaps0[t["id"]]:
-            errs.append(f"track {ti}: new holes ({gaps0[t['id']]} -> {gaps(t)})")
+        if common.gap_count(t) > gaps0[t["id"]]:
+            errs.append(f"track {ti}: new holes ({gaps0[t['id']]} -> {common.gap_count(t)})")
         if t["type"] in ("video", "audio"):
             errs += [f"short segment track {ti} at {s['target_timerange']['start'] / 1e6:.3f} "
                      f"({s['target_timerange']['duration'] / 1e3:.0f} ms)" for s in segs

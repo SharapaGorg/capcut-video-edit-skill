@@ -174,3 +174,38 @@ def test_xcorr_finds_known_offset():
     res = xcorr.sync(voice, cam, sr)
     assert abs(res["offset_us"] - 1_500_000) <= 1_000_000 / fps
     assert res["ok"] and len(res["checks"]) >= 3
+
+
+def test_assemble_refuses_unsynced_pair(dump, cache):
+    import assemble
+    bad = dict(pair("sc2.mp4", "cam1.mp4"), ok=False, z=3.1, within_frame=1)
+    proj, cp = dump({"screencasts": ["sc1.mp4", "sc2.mp4"], "camera": ["cam1.mp4"]},
+                    [pair("sc1.mp4", "cam1.mp4"), bad])
+    cfg = common.load_config(str(cp))
+    before = [p.read_bytes() for p in common.draft_paths(cfg)]
+    with pytest.raises(SystemExit) as e:
+        assemble.run(cfg, dry=False, cache_root=cache, guard_seconds=0)
+    assert "sc2.mp4" in str(e.value) and "--allow-unsynced" in str(e.value)
+    assert [p.read_bytes() for p in common.draft_paths(cfg)] == before
+    assert json.loads(cp.read_text(encoding="utf-8")).get("compounds") is None  # config untouched
+    assemble.run(cfg, dry=False, cache_root=cache, guard_seconds=0, allow_unsynced=True)
+    d = common.read_draft(cfg)
+    comp = json.loads(cp.read_text(encoding="utf-8"))["compounds"]
+    assert len(nested_of(d, outer_by_compound(d, comp["circle"]))["tracks"][-1]["segments"]) == 1  # sc1 only
+
+
+def test_make_compound_refuses_camera_role():
+    import make_compound
+    with pytest.raises(SystemExit) as e:
+        make_compound.main(["--role", "camera", "--config", "unused.json"])
+    assert "assemble.py" in str(e.value)
+
+
+def test_range_helpers():
+    assert common.subtract_ranges(0, 10, [(2, 3), (5, 7)]) == [(0, 2), (3, 5), (7, 10)]
+    assert common.subtract_ranges(0, 10, [(0, 10)]) == []
+    assert common.map_through_cuts(10, [(2, 3), (5, 7)]) == 7
+    assert common.map_through_cuts(6, [(2, 3), (5, 7)]) == 4   # inside a cut -> its start
+    assert common.map_through_cuts(2, [(2, 3)]) == 2
+    tr = {"segments": [{"target_timerange": {"start": 0, "duration": 5}}, {"target_timerange": {"start": 7, "duration": 1}}]}
+    assert common.gap_count(tr) == 1

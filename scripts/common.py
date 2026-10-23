@@ -287,6 +287,32 @@ def check_refs(draft) -> list[str]:
     return errs
 
 
+def subtract_ranges(a, b, ranges) -> list[tuple]:
+    """Parts of [a, b) not covered by `ranges` (sorted, non-overlapping [x, y) pairs)."""
+    out, cur = [], a
+    for x, y in ranges:
+        if y <= cur or x >= b:
+            continue
+        if x > cur:
+            out.append((cur, x))
+        cur = max(cur, y)
+    if cur < b:
+        out.append((cur, b))
+    return out
+
+
+def map_through_cuts(t, cuts):
+    """Time t after removing the [a, b) ranges `cuts` (ripple): t minus the cut length before it. A point inside a
+    cut maps to the cut start. Used for transcript time -> timeline time after stage 1."""
+    return t - sum(min(b, t) - a for a, b in cuts if a < t)
+
+
+def gap_count(track) -> int:
+    """Holes (> 1 us) between consecutive segments of a track."""
+    segs = by_start(track["segments"])
+    return sum(1 for p, q in zip(segs, segs[1:]) if q["target_timerange"]["start"] - seg_end(p) > 1)
+
+
 def us(sec: float) -> int:
     return int(round(sec * 1_000_000))
 

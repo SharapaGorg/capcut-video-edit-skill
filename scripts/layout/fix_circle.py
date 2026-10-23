@@ -83,6 +83,9 @@ def main(argv=None):
     ap.add_argument("--center-x", type=float)
     a = ap.parse_args(argv)
     cfg = common.load_config(a.config)
+    if not (cfg.compounds or {}).get("circle"):
+        print("no circle compound yet (cfg.compounds.circle empty): run stage2/assemble.py first; nothing to fix")
+        return
     d = common.read_draft(cfg)
     try:
         for line in fix(cfg, d, a.keep_geometry, a.center_x):

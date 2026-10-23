@@ -2,9 +2,10 @@
 segment, plus the subdraft/<id>/ folder and the draft_meta_info.json entry (type 18) — the structure CapCut
 makes itself (skeletons in assets/templates/compound.json, harvested by harvest_templates.py).
 
-    python -X utf8 scripts/stage2/make_compound.py --config config.json --role screencast|camera|voice [--dry]
+    python -X utf8 scripts/stage2/make_compound.py --config config.json --role screencast|voice [--dry]
 
-The CLI wraps all segments of one source role (cfg.sources) on their track; assemble.py uses wrap()/write_files().
+The CLI wraps all segments of one source role (screencast or voice) on their track; camera compounds (circle,
+full-screen per stretch) only via assemble.py, which uses wrap()/write_files().
 Audio compounds: CapCut plays a pre-render Resources/combination/<combination_id>_audio.aac; prerender_audio()
 makes it with ffmpeg, else audio_path stays "" and CapCut renders it itself (capcut-format.md).
 """
@@ -316,16 +317,19 @@ def errors(draft: dict, comps: list[Compound]) -> list[str]:
     return errs
 
 
-ROLE_KIND = {"screencast": ("main", 1.0), "camera": ("overlay", 0.0), "voice": ("audio", 1.0)}
+ROLE_KIND = {"screencast": ("main", 1.0), "voice": ("audio", 1.0)}
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="wrap all segments of one source role into a compound clip")
     ap.add_argument("--config", default="config.json")
-    ap.add_argument("--role", required=True, choices=sorted(ROLE_KIND))
+    ap.add_argument("--role", required=True, choices=sorted(ROLE_KIND) + ["camera"])
     ap.add_argument("--name")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args(argv)
+    if a.role == "camera":
+        raise SystemExit("camera is not wrapped here: circle -> 1 compound and full-screen camera -> 1 per stretch "
+                         "are built by scripts/stage2/assemble.py")
     cfg = common.load_config(a.config)
     d = common.read_draft(cfg)
     ix = index(d["materials"])

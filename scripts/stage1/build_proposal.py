@@ -120,7 +120,7 @@ def check_chapters(ch: list[dict]) -> list[str]:
 
 def proposal_md(rows: list[dict], chapters: list[dict], duration: float) -> str:
     def new_time(t):
-        return t - sum(min(r["end"], t) - r["start"] for r in rows if r["start"] < t)
+        return common.map_through_cuts(t, [(r["start"], r["end"]) for r in rows])
     out = ["# Этап 1. Предложение смысловой резки", "",
            "Границы по словам `transcript/transcript.json`, отступ ≥ 80 мс; где слова вплотную — середина зазора (пометка).",
            "Кадры начала/конца: `stage1/frames/NN_a.png`, `NN_b.png`.", "",
