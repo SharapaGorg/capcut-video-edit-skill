@@ -202,3 +202,36 @@ def test_ripple_cut_dry_writes_nothing(project, tmp_path):
     assert (cfg.project_dir / "draft_content.json").read_bytes() == before
     assert not (cfg.work_dir / "stage3" / "ripple_cuts.json").exists()
     assert not list((cfg.work_dir / "backups").glob("stage3-ripple*"))
+
+
+def test_assembly_pairs_checked(project, tmp_path):
+    """layout/assembly.json: s1 camera piece placed by its offset (good), s2 camera piece 0.5 s off (error)."""
+    import build_maps
+    sc = src_dir(tmp_path, "screencasts", ["s1.mp4", "s2.mp4"])
+    cam = src_dir(tmp_path, "camera", ["cam1.mp4"])
+    s1, s2, c1 = (sc / "s1.mp4").as_posix(), (sc / "s2.mp4").as_posix(), (cam / "cam1.mp4").as_posix()
+    cur = draft([("video", [seg("V1", "M1", 0, 10 * S, 0), seg("V2", "M2", 10 * S, 10 * S, 0)]),
+                 ("video", [seg("K1", "MC", 0, 10 * S + 1, 2 * S, volume=0.0),  # 1 us into V2: rounding, not an overlap
+                            seg("K2", "MC2", 10 * S + 1, 10 * S - 1, 30 * S + S // 2, volume=0.0)])],
+                videos=[vmat("M1", s1), vmat("M2", s2), vmat("MC", c1), vmat("MC2", c1)])
+    cfg = project({"camera": str(cam), "screencasts": str(sc), "voice": None}, cur, cur, words_at((1.0, 1.2)))
+    (cfg.work_dir / "layout").mkdir()
+    (cfg.work_dir / "layout" / "assembly.json").write_text(json.dumps({"pairs": [
+        {"voice": "s1.mp4", "camera": "cam1.mp4", "offset_us": 2 * S, "ok": True},
+        {"voice": "s2.mp4", "camera": "cam1.mp4", "offset_us": 30 * S, "ok": True}]}), encoding="utf-8")
+    res = build_maps.run(cfg, audio_check=False)
+    sync = [e for e in res["errs"] if e.startswith("синхрон камеры")]
+    assert len(sync) == 1 and "s2.mp4" in sync[0] and "+500.0 мс" in sync[0]
+    assert any("assembly.json: 2 перекрытий" in n for n in res["notes"])
+    assert "синхрон камеры" in (cfg.work_dir / "stage3" / "report.md").read_text(encoding="utf-8")
+
+
+def test_audio_check_without_ffmpeg_is_skipped(project, tmp_path, monkeypatch):
+    import build_maps
+    sc = src_dir(tmp_path, "screencasts", ["s1.mp4"])
+    cur = draft([("video", [seg("C1", "MC", 0, 10 * S, 0)])], videos=[vmat("MC", (sc / "s1.mp4").as_posix())])
+    cfg = project({"camera": None, "screencasts": str(sc), "voice": None}, cur, cur,
+                  words_at(*[(i * 0.5, i * 0.5 + 0.3) for i in range(6)]))
+    monkeypatch.setattr(build_maps.shutil, "which", lambda name: None)
+    res = build_maps.run(cfg, audio_check=True)
+    assert "audio check skipped: ffmpeg not found" in res["notes"] and res["errs"] == []

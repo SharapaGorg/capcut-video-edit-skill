@@ -8,7 +8,8 @@ speed applied on every level); transcript/transcript.json (stage 0: transcript t
 the RAW draft = the timeline that was transcribed (default: the earliest <work_dir>/backups/stage1-before-*;
 --raw a draft file or a project/backup dir) — it maps transcript time -> (voice file, time in the file);
 stage1/chapters.json (optional); cut logs stage1/cuts_applied.json, stage2/cuts2_applied.json,
-stage3/ripple_cuts.json (optional, cross-check -> report notes).
+stage3/ripple_cuts.json (optional, cross-check -> report notes); layout/assembly.json (optional: camera <->
+voice sync by offset_us, ±1 frame -> errors).
 Voice = mic (cfg.sources.voice, if set) + screencast audio, matched by base name; «x_censored.mp4» = «x.mp4».
 Words in sped pieces are kept (field speed); words cut by less than half are kept with partial; a source piece
 placed twice -> the 2nd entry gets duplicate: true. Cut words -> dropped_words (reason cut | cut_edge).
@@ -22,6 +23,7 @@ import bisect
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -275,6 +277,42 @@ def log_check(cfg, body: list[dict]) -> str:
             f"> 1 кадра: {sum(1 for x in diffs if x > frame)} (ручные правки/хук после логов дают расхождение)")
 
 
+def assembly_check(cfg, d: dict) -> tuple[list[str], str | None]:
+    """STAGE_3 §2: layout/assembly.json pairs (camera_time = voice_time + offset_us). At the middle of every overlap
+    of a camera piece with a voice piece of its pair (any volume, any speed, inside compounds too) the camera source
+    time must equal voice source time + offset, ±1 frame. -> (errors, note); ([], None) if the file is absent."""
+    p = cfg.work_dir / "layout" / "assembly.json"
+    if not p.is_file():
+        return [], None
+    pairs = [x for x in json.loads(p.read_text(encoding="utf-8")).get("pairs") or [] if x.get("ok", True)]
+    off = {(common.uncensored_name(x["camera"]).lower(), common.uncensored_name(x["voice"]).lower()): int(x["offset_us"])
+           for x in pairs}
+    pieces = common.flatten(cfg, d, ("camera",) + VOICE_ROLES)
+    cams = [x for x in pieces if x["role"] == "camera"]
+    voices = [x for x in pieces if x["role"] in VOICE_ROLES]
+    frame = 1e6 / cfg.fps
+    errs, n = [], 0
+    for c in cams:
+        ck = common.uncensored_name(c["path"]).lower()
+        for v in voices:
+            key = (ck, common.uncensored_name(v["path"]).lower())
+            a, b = max(c["start"], v["start"]), min(c["end"], v["end"])
+            if key not in off or b - a < frame:  # touching neighbours (rounding) are not an overlap
+                continue
+            t = (a + b) / 2
+            vs = v["src"] + (t - v["start"]) * v["speed"]
+            cs = c["src"] + (t - c["start"]) * c["speed"]
+            n += 1
+            diff = cs - (vs + off[key])
+            if abs(diff) > frame:
+                errs.append(f"синхрон камеры: {Path(c['path']).name} / {Path(v['path']).name} на "
+                            f"{a / 1e6:.3f}–{b / 1e6:.3f}: сдвиг {diff / 1e3:+.1f} мс от offset assembly.json")
+    note = f"сверка с layout/assembly.json: {n} перекрытий камера↔голос, рассинхрон > 1 кадра: {len(errs)}"
+    if len(errs) > 20:
+        errs = errs[:20] + [f"синхрон камеры: ещё {len(errs) - 20} расхождений"]
+    return errs, note
+
+
 def checks(cfg, d, tmap, vm: VoiceMap, words, chapters, expect_us):
     errs, notes = [], []
     tracks = tmap["tracks"]
@@ -353,6 +391,9 @@ def audio_verify(tt: dict, vm: VoiceMap, errs: list, notes: list) -> list[dict]:
         n = len(x) // hop
         return np.sqrt((x[:n * hop].reshape(n, hop) ** 2).mean(1) + 1e-12)
 
+    if shutil.which("ffmpeg") is None:
+        notes.append("audio check skipped: ffmpeg not found")
+        return []
     try:
         from faster_whisper import WhisperModel
         wm = WhisperModel("base", device="cpu", compute_type="int8")
@@ -371,11 +412,16 @@ def audio_verify(tt: dict, vm: VoiceMap, errs: list, notes: list) -> list[dict]:
         fa, a0 = w0["file"], w0["file_start"]          # A: transcript -> raw draft -> file
         a1 = w1["file_start"] + (w1["src_end"] - w1["src_start"])
         tl0, tl1 = w0["start"], w1["end"]              # B: timeline -> map -> file
-        seg = next(s for s in vm.cur if s["timeline_in_us"] / 1e6 - 1e-3 <= tl0 < s["timeline_out_us"] / 1e6)
+        seg = next((s for s in vm.cur if s["timeline_in_us"] / 1e6 - 1e-3 <= tl0 < s["timeline_out_us"] / 1e6),
+                   vm.by_flat[w0["flat_id"]])  # independent lookup in the map; the word's own piece as fallback
         fb = common.uncensored_name(seg["file"])
         b0 = (seg["source_in_us"] + (tl0 * 1e6 - seg["timeline_in_us"]) * seg["speed"]) / 1e6
         b1 = (seg["source_in_us"] + (tl1 * 1e6 - seg["timeline_in_us"]) * seg["speed"]) / 1e6
-        xa, xb = pcm(path_of.get(fa, seg["file"]), a0, a1 - a0), pcm(seg["file"], b0, b1 - b0)
+        try:
+            xa, xb = pcm(path_of.get(fa, seg["file"]), a0, a1 - a0), pcm(seg["file"], b0, b1 - b0)
+        except FileNotFoundError:
+            notes.append("audio check skipped: ffmpeg not found")
+            return rows
         n = min(len(xa), len(xb))
         corr = float(np.corrcoef(env(xa[:n]), env(xb[:n]))[0, 1]) if n > 1600 else 0.0
         same = fa == fb and abs(a0 - b0) < 0.02 and abs(a1 - b1) < 0.02
@@ -474,6 +520,10 @@ def run(cfg, raw: str | None = None, expect_us: int | None = None, audio_check: 
     chapters, plates = chapters_timeline(cfg, d, T, body)
     errs, notes = checks(cfg, d, tmap, vm, words, chapters, expect_us)
     notes.append(log_check(cfg, body))
+    a_errs, a_note = assembly_check(cfg, d)
+    errs += a_errs
+    if a_note:
+        notes.append(a_note)
     rows = audio_verify(tt, vm, errs, notes) if audio_check and words else []
     print("VALIDATION:", "OK" if not errs else "FAIL")
     for e in errs[:20]:
