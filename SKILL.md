@@ -80,7 +80,8 @@ description: Монтаж ролика — монтаж длинного YouTube
 ## Этапы → reference → скрипты
 | Этап | Reference | Скрипты |
 |---|---|---|
-| Проект | — | `scripts/capcut_new_project.py`, `scripts/common.py` |
+| Ролик и проект | — | `scripts/init_video.py` (рабочая папка + config.json), `scripts/capcut_new_project.py` (EXPERIMENTAL) |
+| Общие модули | references/capcut-format.md | `scripts/common.py` (конфиг, запись в оба draft, проверки), `scripts/effects.py` (эффекты из шаблонов), `scripts/harvest_templates.py` (снять шаблоны с проекта) |
 | 0 Транскрипция | references/stages/STAGE_0.md | `scripts/stage0/transcribe.py` |
 | 1 Смысловая резка | references/stages/STAGE_1.md | `scripts/stage1/{build_proposal,apply_cuts}.py` |
 | 2 Техническая резка + сборка | references/stages/STAGE_2.md | `scripts/stage2/{analyze,verify,apply,assemble,make_compound}.py`, `scripts/layout/{xcorr,add_camera,fix_circle,wb_fix}.py` |
@@ -88,7 +89,7 @@ description: Монтаж ролика — монтаж длинного YouTube
 | LAYOUT S/F | references/stages/STAGE_LAYOUT.md | `scripts/layout/{candidates,apply_layout,make_compound_f}.py` |
 | 4 Хук и концовка | references/stages/STAGE_4.md | `scripts/stage4/apply_hook.py` |
 | 5 Цензура | references/stages/STAGE_5.md | `scripts/stage5/{extract_frames,run_ocr,scan_patterns,build_findings,apply_censor,verify_censor}.py` |
-| 6 Зумы + SFX | references/stages/STAGE_6.md | `scripts/stage6/{find_focus,apply_zooms,check_zooms}.py` |
+| 6 Зумы + SFX | references/stages/STAGE_6.md | `scripts/stage6/{find_focus,apply_zooms,check_zooms}.py` (фокус-зум на скринкасте — только в compound без кружка: сначала разделить) |
 | 7 Иллюстрации | references/stages/STAGE_7.md, references/graphics.md | `scripts/graphics/{gfx_build,render,preview,apply_graphics,apply_sfx}.py` |
 | 8 Фразы и заставки | references/stages/STAGE_8.md, references/graphics.md | то же |
 | 9 Музыка | references/stages/STAGE_9.md | `scripts/stage9/{prepare,beats,build_voice,apply_music,music_gain,measure_lufs,check_mix}.py` |

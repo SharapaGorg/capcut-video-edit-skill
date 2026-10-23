@@ -4,7 +4,8 @@
 Цель: тихая подложка, которая не мешает голосу.
 
 ## Перед началом
-- Треки — из папки музыки (`config.json` → `sfx_dir` / `music_dir`). Только с правом использования на YouTube (YouTube Audio Library и подобное) — иначе Content ID.
+- Треки — из папки музыки (`config.json` → `music_dir`). Только с правом использования на YouTube (YouTube Audio Library и подобное) — иначе Content ID.
+- По умолчанию `apply_music.py` берёт один трек — первый файл `music_dir` по имени (выбор печатается). Другие треки: `--files ИМЯ …` (в порядке звучания, по одному на главу или группу глав) или `--tracks N` (первые N файлов).
 - Deep — шаблон `assets/templates/deep_effect.json` (поиск в кэше по resource_id, capcut-format.md).
 
 ## Где и как громко

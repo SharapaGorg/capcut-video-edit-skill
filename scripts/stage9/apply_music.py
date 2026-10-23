@@ -351,8 +351,8 @@ def run(cfg, names=None, n_tracks: int | None = None, dry: bool = False, cache_r
 def main(argv=None):
     ap = argparse.ArgumentParser(description="stage 9: background music (voice −13 LU, pauses +6 dB, ending −10 LU)")
     ap.add_argument("--config", default="config.json")
-    ap.add_argument("--files", nargs="+", help="file names in music_dir (default: all, sorted)")
-    ap.add_argument("--tracks", type=int, help="use at most N tracks")
+    ap.add_argument("--files", nargs="+", help="file names in music_dir, in play order (default: the first file of music_dir by name, choice printed)")
+    ap.add_argument("--tracks", type=int, help="use the first N files of music_dir (or of --files)")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args(argv)
     run(common.load_config(a.config), a.files, a.tracks, a.dry)
