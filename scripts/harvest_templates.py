@@ -294,9 +294,9 @@ def _unname(o):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Harvest CapCut effect templates")
-    g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--project", help="CapCut project dir (com.lveditor.draft/<name>)")
-    g.add_argument("--config", help="config.json of the video (uses project_dir)")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--project", help="CapCut project dir (com.lveditor.draft/<name>); overrides --config")
+    g.add_argument("--config", default="config.json", help="config.json of the video (uses project_dir)")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "assets" / "templates"))
     ap.add_argument("--only", help="comma-separated template names to write (default: all)")
     a = ap.parse_args(argv)

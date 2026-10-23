@@ -14,7 +14,10 @@ SCRIPTS = ROOT / "scripts"
 FORBIDDEN = ["Гайд" + " конкуренты", "E87" + "DC4D2", "IMG" + "_E02", "AiVideo" + "Editing",
              "4-гайд-на-" + "анализ-конкурентов", "write" + "lo", "stage11" + "_intro", "illustrations" + "/"]
 FORBIDDEN_RE = re.compile("Compound" + r" clip\d")
-TEXT = {".py", ".md", ".json", ".js", ".css", ".html", ".txt", ".cube", ".yml", ".yaml", ".toml", ".cfg", ".ini"}
+# Every file that decodes as UTF-8 is scanned; only known binary formats are skipped.
+BINARY = {".ttf", ".otf", ".woff", ".woff2", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".mov", ".mp4", ".mkv",
+          ".m4a", ".mp3", ".wav", ".aac", ".flac", ".ogg", ".pyc", ".pyd", ".dll", ".exe", ".zip", ".gz", ".f32",
+          ".gray", ".npy", ".pdf"}
 SKIP_DIRS = {".git", ".superpowers", "__pycache__", ".pytest_cache"}
 
 # Scripts with a CLI that write into the CapCut project of config.json (call write_draft).
@@ -32,20 +35,28 @@ def _skill_files():
             continue
         if rel.parts[:2] == ("assets", "examples"):
             continue
-        if p.suffix.lower() in TEXT:
-            yield p, rel
+        if p.suffix.lower() in BINARY:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        yield p, rel, text
 
 
 def test_no_first_video_hardcodes():
     bad = []
-    for p, rel in _skill_files():
-        text = p.read_text(encoding="utf-8", errors="replace")
+    scanned = set()
+    for p, rel, text in _skill_files():
+        scanned.add(rel.as_posix())
         if p.name == Path(__file__).name:
             text = text.replace(text[text.index("FORBIDDEN = ["):text.index("FORBIDDEN_RE")], "")
         bad += [f"{rel}: {f}" for f in FORBIDDEN if f in text]
         if FORBIDDEN_RE.search(text):
             bad.append(f"{rel}: Compound clipN")
     assert not bad, bad
+    # extension-less / unusual text files are scanned too (not only a fixed list of extensions)
+    assert {"SKILL.md", ".gitignore", "assets/templates/compound.json", "scripts/shorts/shorts.css"} <= scanned
 
 
 def test_skill_md_under_500_lines_with_frontmatter():
@@ -115,12 +126,12 @@ def test_apply_scripts_classified():
         if p.name in NO_CONFIG:
             assert not _writes_project(src), p.name
         else:
-            assert _config_default(src) in ("config.json", None), (p.name, _config_default(src))
+            assert _config_default(src) == "config.json", (p.name, _config_default(src))
 
 
 @pytest.mark.parametrize("script", APPLY, ids=lambda p: p.relative_to(SCRIPTS).as_posix())
 def test_every_script_has_dry_and_config(script):
-    assert _config_default(script.read_text(encoding="utf-8")) in ("config.json", None)
+    assert _config_default(script.read_text(encoding="utf-8")) == "config.json"
     r = subprocess.run([sys.executable, "-X", "utf8", str(script), "--help"], capture_output=True, text=True,
                        encoding="utf-8", cwd=str(script.parent), timeout=120)
     assert r.returncode == 0, r.stderr[-2000:]
