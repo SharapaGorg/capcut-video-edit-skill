@@ -192,3 +192,87 @@ def test_cam_lut_candidates(tmp_path):
     cp.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(SystemExit, match="нет камеры"):
         cam_lut.main(["--config", str(cp)])
+
+
+# ---------- fix round 1 ----------
+def peaky_voice(path: Path, seconds=8.0, sr=48000):
+    """Speech-like: 200-Hz buzz in syllable bursts at about −26 LUFS with sharp spikes near 0 dBFS (crest ~25 dB)."""
+    rng = np.random.default_rng(3)
+    t = np.arange(int(seconds * sr)) / sr
+    env = np.clip(np.sin(2 * np.pi * 3.0 * t), 0, None) ** 2
+    x = 0.04 * env * (np.sign(np.sin(2 * np.pi * 200 * t)) * 0.5 + 0.5 * rng.standard_normal(len(t)))
+    for k in rng.integers(0, len(t) - 200, 40):
+        x[k:k + 60] += 0.95 * np.hanning(60) * rng.choice([-1, 1])
+    import subprocess
+    raw = path.with_suffix(".f32")
+    x.astype(np.float32).tofile(raw)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", str(raw),
+                    "-c:a", "pcm_f32le", str(path)], check=True)
+    raw.unlink()
+    return path
+
+
+def test_final_loop_converges_and_refuses_out_of_norm(tmp_path):
+    pre = peaky_voice(tmp_path / "mix_pre.wav")
+    r = build_render.final_loop(pre, tmp_path / "mix_final.m4a")
+    m = build_render.measure(tmp_path / "mix_final.m4a")
+    assert r["ok"] and abs(m["I"] + 14) <= 0.5 and m["TP"] <= -1.1, (r, m)
+    # forced non-convergence: one pass only -> not in norm; delivery refuses, nothing in out/
+    r1 = build_render.final_loop(pre, tmp_path / "one.m4a", iters=1)
+    assert not r1["ok"]
+    wfinal = tmp_path / "work" / "final.mp4"
+    wfinal.parent.mkdir()
+    wfinal.write_bytes(b"x")
+    out = tmp_path / "out" / "01_x.mp4"
+    with pytest.raises(SystemExit, match="вне нормы"):
+        build_render.deliver(wfinal, out, {"in_norm": False, "final_I": r1["I"], "final_TP": r1["TP"]})
+    assert not out.exists() and wfinal.exists()
+    assert build_render.deliver(wfinal, out, {"in_norm": True}).is_file()
+
+
+def test_cam_lut_align_flat_frame():
+    """A flat frame has no ORB descriptors: not aligned, no crash."""
+    flat = np.full((216, 384, 3), 0.5, np.float32)
+    assert cam_lut.align(flat, flat) == (None, 0)
+    rng = np.random.default_rng(0)
+    noise = rng.random((216, 384, 3)).astype(np.float32)
+    A, n = cam_lut.align(noise, flat)
+    assert A is None or n < cam_lut.MIN_INLIERS
+
+
+def test_whoosh_needs_hint_name(tmp_path):
+    ctx = build.load(shorts_work(tmp_path))
+    (tmp_path / "sfx").mkdir()
+    (tmp_path / "sfx" / "click.wav").write_bytes(b"")
+    ctx.cfg.sfx_dir = str(tmp_path / "sfx")
+    with pytest.raises(SystemExit, match="whoosh"):
+        build_render.whoosh_file(ctx, {})
+
+
+def test_extend_piece_shifts_keys_and_mute(tmp_path):
+    ctx = build.load(shorts_work(tmp_path))
+    ctx.speed = 1.0
+    p = {"tl0": 10.0, "tl1": 12.0, "s0": 0.0, "dur": 2.0, "src_dur": 2.0, "layout": "stack", "zoom": None,
+         "sc": {"file": "sc.mp4", "start": 110.0, "speed": 1.0, "name": "sc.mp4"}, "cam": None,
+         "aud": {"file": "sc.mp4", "start": 110.0, "speed": 1.0, "name": "sc.mp4", "gain": 1.0},
+         "keys": [{"t": 0.0, "zoom": [0, 0, 900, 900], "ease": 0.6}, {"t": 2.5, "zoom": [100, 0, 900, 900], "ease": 0.6}],
+         "mute": [[0.5, 1.0]]}
+    pieces, words = [p], []
+    d = build.extend_piece(ctx, p, 113.0, 2.0, pieces, words)
+    e = pieces[-1]
+    assert abs(d - 1.0) < 1e-9 and e["s0"] == 2.0 and e["sc"]["start"] == 112.0
+    assert [k["t"] for k in e["keys"]] == [-2.0, 0.5] and "mute" not in e
+    assert words and all(2.0 <= w["start"] < 3.0 for w in words)
+
+
+def test_graphics_keep_shorts_timings(tmp_path):
+    spec = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+    ctx = build.load(shorts_work(tmp_path))
+    s = dict(spec, cards=[{"tl_in": 412.0, "tl_out": 418.0, "title": "Т", "items": [{"text": "a"}]}])
+    pl = build.plan(ctx, s)
+    html = build.build_html(ctx, s, pl, tmp_path).read_text(encoding="utf-8")
+    import re
+    for cls in ("kicker", "plate", "row"):
+        tags = re.findall(r'<(?:span|div) class="' + cls + r'[^"]*" data-in[^>]*>', html)
+        tags = [t for t in tags if 'data-dist="40"' in t]
+        assert tags and all('data-dur="0.22" data-odur="0.25"' in t for t in tags), cls

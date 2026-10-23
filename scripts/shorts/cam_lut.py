@@ -106,7 +106,33 @@ def src_at(cams, c):
 def grab(path, t, vf, w, h):
     r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{t:.4f}', '-i', str(path), '-frames:v', '1', '-vf', vf,
                         '-f', 'rawvideo', '-'], capture_output=True)
+    if len(r.stdout) < w * h * 3 * 2:
+        return None                      # no frame there (past the end / decode error)
     return np.frombuffer(r.stdout, np.uint16)[:w * h * 3].reshape(h, w, 3).astype(np.float32) / 65535
+
+
+MIN_INLIERS = 200
+
+
+def align(s, r):
+    """Affine render -> source frame by ORB + RANSAC: (A, inliers) or (None, 0) when there is nothing to match
+    (no descriptors on a flat frame, too few matches, RANSAC failed)."""
+    import cv2
+    g1 = cv2.equalizeHist((s.mean(2) * 255).astype(np.uint8))
+    g2 = cv2.equalizeHist((r.mean(2) * 255).astype(np.uint8))
+    orb = cv2.ORB_create(4000)
+    k1, d1 = orb.detectAndCompute(g1, None)
+    k2, d2 = orb.detectAndCompute(g2, None)
+    if d1 is None or d2 is None or len(k1) < 3 or len(k2) < 3:
+        return None, 0
+    m = sorted(cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True).match(d2, d1), key=lambda x: x.distance)[:800]
+    if len(m) < 3:
+        return None, 0
+    A, inl = cv2.estimateAffinePartial2D(np.float32([k2[x.queryIdx].pt for x in m]),
+                                         np.float32([k1[x.trainIdx].pt for x in m]), ransacReprojThreshold=2.0)
+    if A is None or inl is None:
+        return None, 0
+    return A, int(inl.sum())
 
 
 def pair(cams, render, c):
@@ -119,14 +145,13 @@ def pair(cams, render, c):
     rw_, rh_ = probe_wh(render)
     s = grab(f, t, SRC_VF, sw, sh)
     r = grab(render, c, REN_VF, rw_, rh_)
-    g1 = cv2.equalizeHist((s.mean(2) * 255).astype(np.uint8))
-    g2 = cv2.equalizeHist((r.mean(2) * 255).astype(np.uint8))
-    orb = cv2.ORB_create(4000)
-    k1, d1 = orb.detectAndCompute(g1, None)
-    k2, d2 = orb.detectAndCompute(g2, None)
-    m = sorted(cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True).match(d2, d1), key=lambda x: x.distance)[:800]
-    A, inl = cv2.estimateAffinePartial2D(np.float32([k2[x.queryIdx].pt for x in m]),
-                                         np.float32([k1[x.trainIdx].pt for x in m]), ransacReprojThreshold=2.0)
+    if s is None or r is None:
+        print(f'  {c}: нет кадра (исходник или рендер) — пропуск')
+        return np.empty((0, 3), np.float32), np.empty((0, 3), np.float32), (None, None, None)
+    A, n_in = align(s, r)
+    if A is None or n_in < MIN_INLIERS:                  # not aligned (circle / graphics / flat frame)
+        print(f'  {c}: {Path(f).name} @ {t:.2f}, не совместился (inliers {n_in}) — пропуск')
+        return np.empty((0, 3), np.float32), np.empty((0, 3), np.float32), (s, None, None)
     rw = cv2.warpAffine(r, A, (sw, sh), flags=cv2.INTER_LINEAR, borderValue=(-1, -1, -1))
     valid = (rw[..., 0] >= 0)
     yy, xx = np.mgrid[0:sh, 0:sw]
@@ -135,10 +160,8 @@ def pair(cams, render, c):
     # drop object edges (motion / alignment error)
     edge = cv2.dilate(cv2.Canny((s.mean(2) * 255).astype(np.uint8), 20, 60), np.ones((5, 5), np.uint8)) > 0
     msk = valid & center & ~edge
-    print(f'  {c}: {Path(f).name} @ {t:.2f}, масштаб {np.hypot(A[0, 0], A[0, 1]):.3f}, inliers {int(inl.sum())}, '
+    print(f'  {c}: {Path(f).name} @ {t:.2f}, масштаб {np.hypot(A[0, 0], A[0, 1]):.3f}, inliers {n_in}, '
           f'пикселей {int(msk.sum())}')
-    if inl.sum() < 200:
-        msk[:] = False                   # not aligned
     return s[msk], rw[msk], (s, rw, valid)
 
 

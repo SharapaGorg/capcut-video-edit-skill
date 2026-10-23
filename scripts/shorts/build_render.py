@@ -34,7 +34,7 @@ DYN_PUNCH, DYN_SFX_PEAK = 1.18, -27.0
 VOICE_FX = ('highpass=f=80,equalizer=f=250:t=q:w=1:g=-1.5,highshelf=g=5:f=2500:t=q:w=0.7,'
             'equalizer=f=5000:t=q:w=1.2:g=1.5,acompressor=threshold=-20dB:ratio=2.5:attack=5:release=120:makeup=2')
 VOICE_LUFS, MUSIC_REL, SFX_PEAK = -19.0, -13.0, -22.0   # music = voice −13 LU; whoosh peak −22 dBFS before the final gain
-FINAL_I, FINAL_TOL, FINAL_TP, FINAL_ITER = -14.0, 0.5, -1.1, 4
+FINAL_I, FINAL_TOL, FINAL_TP, FINAL_ITER = -14.0, 0.5, -1.1, 6
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 WHOOSH_HINTS = ("вуш", "whoosh", "swoosh")     # default whoosh: first file in sfx_dir (recursive) with one in its name
 
@@ -200,7 +200,7 @@ def piece_full(ctx, p, zcurve, cx, out_v):
         if last is None: raise RuntimeError(f"{c['file']}: no frames at {c['start']:.3f}")
         enc.stdin.write(np.ascontiguousarray(frame_full(last, zcurve(p['s0'] + i / FPS), cx)).tobytes())
     dec.stdout.close(); dec.kill(); enc.stdin.close(); enc.wait()
-    assert enc.returncode == 0, out_v
+    if enc.returncode != 0: raise RuntimeError(f'ffmpeg encode failed: {out_v}')
 
 
 # ---------------- zoom (camera on full screen only) ----------------
@@ -322,7 +322,7 @@ def extract(ctx, pl, wd, spec):
     with ThreadPoolExecutor(4) as ex: list(ex.map(vid, range(N)))
     for i, p in enumerate(pl['pieces']):
         n = int(run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', str(pdir / f'{i:03d}.mp4')]).stdout.strip().strip(','))
-        assert n == fr(p['dur']), f'{i:03d}: {n} кадров, ждали {fr(p["dur"])}'
+        if n != fr(p['dur']): raise RuntimeError(f'{i:03d}: {n} кадров, ждали {fr(p["dur"])}')
     (wd / 'video.txt').write_text(''.join(f"file '{(pdir / f'{i:03d}.mp4').as_posix()}'\n" for i in range(N)), encoding='utf-8')
     run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'video.txt'), '-c', 'copy', str(wd / 'video.mp4')])
 
@@ -340,7 +340,7 @@ def render(html_path, n, mov):
             page.evaluate(f'seek({i / FPS})')
             p.stdin.write(page.screenshot(omit_background=True, type='png', clip={'x': 0, 'y': 0, 'width': W, 'height': H}))
         p.stdin.close(); p.wait(); b.close()
-        assert p.returncode == 0
+        if p.returncode != 0: raise RuntimeError(f'ffmpeg ProRes encode failed: {mov}')
         print(f'  графика: {n} кадров за {time.time() - t:.0f} с')
 
 
@@ -377,7 +377,7 @@ def music_file(ctx, spec):
 
 def whoosh_file(ctx, spec):
     """spec "whoosh" (a path inside sfx_dir or absolute), else the first file in sfx_dir (recursive, sorted) whose name
-    has «вуш»/«whoosh»/«swoosh», else the first audio file there. sfx_dir unset -> None (a warning, no whoosh)."""
+    has «вуш»/«whoosh»/«swoosh» (none -> error). sfx_dir unset -> None (a warning, no whoosh)."""
     d = ctx.cfg.sfx_dir
     if spec.get('whoosh'):
         p = _pick(spec['whoosh'], d or '.')
@@ -389,9 +389,72 @@ def whoosh_file(ctx, spec):
     if not Path(d).is_dir(): raise SystemExit(f'sfx_dir не найден: {d}')
     files = sorted((p for p in Path(d).rglob('*') if p.suffix.lower() in AUDIO_EXT), key=lambda p: p.as_posix().lower())
     hit = [p for p in files if any(h in p.name.lower() for h in WHOOSH_HINTS)]
-    if not (hit or files): raise SystemExit(f'в sfx_dir нет аудиофайлов: {d}')
-    print(f'  вуш: {(hit or files)[0].name} (другой — "whoosh" в спеке)')
-    return (hit or files)[0]
+    if not hit:
+        raise SystemExit(f'в sfx_dir ({d}) нет файла с «вуш» / «whoosh» / «swoosh» в имени: задать "whoosh" в спеке '
+                         '(путь внутри sfx_dir)')
+    print(f'  вуш: {hit[0].name} (другой — "whoosh" в спеке)')
+    return hit[0]
+
+
+def _gain_lim(pre, out, g, lim):
+    run(['ffmpeg', '-v', 'error', '-y', '-i', str(pre), '-af',
+         f"aresample=192000,volume={g:.2f}dB,alimiter=limit={10 ** (lim / 20):.4f}:attack=3:release=80:level=false,"
+         "aresample=48000",       # limiter at 4x oversampling: sample peaks ≈ true peaks, TP after AAC stays near the limit
+         '-c:a', 'aac', '-b:a', '192k', str(out)])
+    return measure(out)
+
+
+def in_norm(I, tp):
+    return abs(I - FINAL_I) <= FINAL_TOL and tp <= FINAL_TP
+
+
+def final_loop(pre, out, iters=None):
+    """Final gain + limiter -> AAC, measured AFTER AAC, until −14 ±0.5 LUFS and TP <= −1.1 (at most FINAL_ITER passes).
+    Gain step = secant over the last two (gain, I) passes at the same limiter level (behind the limiter 1 dB of gain
+    gives less than 1 LU on peaky voice; a full-error step undershoots forever), clamped to 1..12 dB per pass and
+    never into a region already known to overshoot/undershoot. TP over → the limiter goes down and the secant restarts.
+    The best pass (in norm, else the nearest to −14 with TP ok) is kept in `out`. -> {I, TP, gain, limit, passes, ok}"""
+    iters = iters or FINAL_ITER
+    I_pre = measure(pre)['I']
+    g, lim = FINAL_I - I_pre + 1.0, -2.0
+    hist, best = [], None
+    tmp = Path(out).with_name(Path(out).stem + '_try' + Path(out).suffix)
+    for n in range(1, iters + 1):
+        m = _gain_lim(pre, tmp, g, lim)
+        I, tp = m['I'], m['TP']
+        print(f'  громкость, проход {n}: гейн {g:+.2f} dB, лимит {lim:.1f} dBFS -> I {I} LUFS, TP {tp}')
+        key = (not in_norm(I, tp), tp > FINAL_TP, abs(I - FINAL_I))
+        if best is None or key < best[0]:
+            best = (key, dict(I=I, TP=tp, gain=round(g, 2), limit=round(lim, 2), passes=n, ok=in_norm(I, tp)))
+            shutil.copy(tmp, out)
+        if in_norm(I, tp):
+            break
+        if tp > FINAL_TP:                         # peaks: lower the ceiling, keep the gain, restart the secant
+            lim -= tp - FINAL_TP + 0.1
+            hist = []
+            continue
+        hist.append((g, I))
+        if len(hist) >= 2 and abs(hist[-1][1] - hist[-2][1]) > 0.05 and abs(hist[-1][0] - hist[-2][0]) > 0.01:
+            slope = (hist[-1][1] - hist[-2][1]) / (hist[-1][0] - hist[-2][0])
+            slope = min(max(slope, 0.05), 1.0)
+            step = (FINAL_I - I) / slope
+        else:
+            step = FINAL_I - I
+        step = max(-12.0, min(12.0, step))
+        g += step
+    tmp.unlink(missing_ok=True)
+    best[1]['passes_total'] = n
+    return best[1]
+
+
+def deliver(wd_final, out_final, rep):
+    """Copy the final to out/ only when the loudness is in norm; else stop with exit 1 and leave it in work/."""
+    if not rep['in_norm']:
+        raise SystemExit(f"громкость вне нормы: I {rep['final_I']} LUFS, TP {rep['final_TP']} (нужно −14 ±0.5, TP ≤ −1.1) — "
+                         f"файл оставлен в {wd_final}, в out/ не скопирован; проверить микс (report*.json → loop)")
+    Path(out_final).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(wd_final, out_final)
+    return Path(out_final)
 
 
 def mix(ctx, spec, pl, wd, final, gfx):
@@ -417,20 +480,12 @@ def mix(ctx, spec, pl, wd, final, gfx):
     fc = ';'.join(parts) + ';' + ''.join(labels) + f"amix=inputs={len(labels)}:normalize=0:duration=first[a]"
     # pass 1: the mix without the final gain, measured
     run(['ffmpeg', '-v', 'error', '-y', *ins, '-filter_complex', fc, '-map', '[a]', '-t', f'{T:.3f}', '-c:a', 'pcm_f32le', str(wd / 'mix_pre.wav')])
-    # gain + limiter, AAC, measured AFTER AAC; up to 4 iterations until −14 ±0.5 LUFS and TP <= −1.1
-    I_pre = measure(wd / 'mix_pre.wav')['I']; g_fin = FINAL_I - I_pre + 1.0; lim = -2.0
-    for _ in range(FINAL_ITER):
-        run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'mix_pre.wav'), '-af', f"volume={g_fin:.2f}dB,alimiter=limit={10 ** (lim / 20):.4f}:attack=3:release=80:level=false,aresample=48000",
-             '-c:a', 'aac', '-b:a', '192k', str(wd / 'mix_final.m4a')])
-        m = measure(wd / 'mix_final.m4a'); I, tp = m['I'], m['TP']
-        if abs(I - FINAL_I) <= FINAL_TOL and tp <= FINAL_TP: break
-        g_fin += FINAL_I - I
-        if tp > FINAL_TP: lim -= tp - FINAL_TP + 0.1
+    loud = final_loop(wd / 'mix_pre.wav', wd / 'mix_final.m4a')
     run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'video.mp4'), '-i', str(gfx), '-i', str(wd / 'mix_final.m4a'),
          '-filter_complex', f"[0:v]tpad=stop_mode=clone:stop_duration={ctx.end_dur}[v0];[v0][1:v]overlay=format=auto:shortest=1[vo]",
          '-map', '[vo]', '-map', '2:a', '-t', f'{T:.3f}', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', str(FPS),
          '-c:a', 'copy', '-movflags', '+faststart', str(final)])
     fin = measure(final)
     return dict(voice_lufs_pre=v, gain_voice=gv, gain_music=gm, gain_sfx=gs, music=str(music) if music else None,
-                whoosh=str(whoosh) if whoosh else None, final_I=fin['I'], final_TP=fin['TP'],
+                whoosh=str(whoosh) if whoosh else None, loop=loud, final_I=fin['I'], final_TP=fin['TP'],
                 in_norm=abs(fin['I'] - FINAL_I) <= FINAL_TOL and fin['TP'] <= FINAL_TP)

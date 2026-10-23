@@ -45,6 +45,8 @@ DYN_MAXPIECE = 2.6              # dynamic mode: a longer piece is split on a wor
 HOOK_TOP = {'stack': CAM_H + 50, 'full': 1120, 'scfull': 380}   # text never on the face: stack -> on the screencast
 CAP_TOP = {'stack': 790, 'full': 1500, 'scfull': 1560}
 CAP_MAXCH = 18
+# approved shorts timings (entry 0.22 s, exit 0.25 s); the shared anim.js defaults differ (0.25 / 0.2)
+ANIM = ' data-dur="0.22" data-odur="0.25"'
 VIDEO_ROLES = ('camera', 'screencast')
 
 
@@ -249,6 +251,11 @@ def extend_piece(ctx, p, to, cur, pieces, words_out):
     def shift(sx):
         return dict(sx, start=sx['start'] + p['src_dur'] * sx['speed']) if sx else None
     np_ = dict(p, tl0=p['tl1'], tl1=p['tl1'], s0=cur, dur=dur, src_dur=src_dur, sc=shift(p.get('sc')), cam=shift(p.get('cam')), aud=dict(shift(a), gain=a['gain']))
+    # keys / mute are relative to the piece start: shift by the original piece, mutes clipped to the new piece
+    if p.get('keys'): np_['keys'] = [dict(k, t=k['t'] - p['dur']) for k in p['keys']]
+    np_.pop('mute', None)
+    mutes = [[max(m0 - p['dur'], 0.0), min(m1 - p['dur'], dur)] for m0, m1 in p.get('mute', []) if m1 - p['dur'] > 0 and m0 - p['dur'] < dur]
+    if mutes: np_['mute'] = mutes
     pieces.append(np_)
     name = Path(a['file']).name
     for w in ctx.master.CW:
@@ -305,9 +312,9 @@ def html_hook(ctx, spec, pl):
     if not hk: return ''
     tout = hk.get('dur', hook_dur(ctx))
     parts = []
-    if hk.get('kicker'): parts.append(f'<span class="kicker" data-in="0.1" data-out="{tout}" data-fx="slide-left" data-dist="40">{esc(hk["kicker"])}</span>')
+    if hk.get('kicker'): parts.append(f'<span class="kicker" data-in="0.1" data-out="{tout}" data-fx="slide-left" data-dist="40"{ANIM}>{esc(hk["kicker"])}</span>')
     for i, line in enumerate(hk['lines']):
-        parts.append(f'<span class="plate" data-in="{0.12 + i * 0.1:.2f}" data-out="{tout + i * 0.03:.2f}" data-fx="pop" data-ofx="slide-left" data-dist="40">{line}</span>')
+        parts.append(f'<span class="plate" data-in="{0.12 + i * 0.1:.2f}" data-out="{tout + i * 0.03:.2f}" data-fx="pop" data-ofx="slide-left" data-dist="40"{ANIM}>{line}</span>')
     top = HOOK_TOP[piece_at(pl, 0.5)['layout']]       # rule: text never on the face
     return f'<div class="hook" style="top:{top}px">' + ''.join(parts) + '</div>'
 
@@ -338,12 +345,12 @@ def html_cards(ctx, spec, pl):
         top = c.get('top', 920)
         rows = []
         if c.get('title'):
-            rows.append(f'<span class="plate" data-in="{tin:.2f}" data-out="{tout:.2f}" data-fx="slide-left" data-dist="40">{c["title"]}</span>')
+            rows.append(f'<span class="plate" data-in="{tin:.2f}" data-out="{tout:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>{c["title"]}</span>')
         for i, it in enumerate(c.get('items', [])):
             at = tl2s(ctx, pl, it['at']) if 'at' in it else tin + 0.25 * (i + 1)
             at = max(at, tin + 0.15 * (i + 1))
             n = it.get('n', f'{i + 1:02d}')
-            rows.append(f'<div class="row" data-in="{at:.2f}" data-out="{tout + 0.03 * i:.2f}" data-fx="slide-left" data-dist="40"><div class="n {it.get("ncls", "")}">{n}</div><span class="plate">{it["text"]}</span></div>')
+            rows.append(f'<div class="row" data-in="{at:.2f}" data-out="{tout + 0.03 * i:.2f}" data-fx="slide-left" data-dist="40"{ANIM}><div class="n {it.get("ncls", "")}">{n}</div><span class="plate">{it["text"]}</span></div>')
         if c.get('html'): rows.append(c['html'].replace('{in}', f'{tin:.2f}').replace('{out}', f'{tout:.2f}'))
         out.append(f'<div class="card" style="top:{top}px">' + ''.join(rows) + '</div>')
     return '\n'.join(out)
@@ -364,23 +371,23 @@ def html_end(ctx, spec, pl):
         th = ctx.cfg.tiktok_thumbnail
         img = ''
         if th and Path(th).is_file():
-            img = f'<img class="yt" src="{Path(th).resolve().as_uri()}" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="60">'
+            img = f'<img class="yt" src="{Path(th).resolve().as_uri()}" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="60"{ANIM}>'
         else:
             print(f'  ВНИМАНИЕ: tiktok_thumbnail {"не найден: " + th if th else "не задан"} — концовка без скрина превью YouTube')
         if ch:
             return (dim + '<div class="end tiktok">' + img +
-                    f'<span class="plate" data-in="{t + 0.1:.2f}" data-fx="pop" data-dist="40">Полное видео на YouTube: {esc(ch)}</span></div>')
+                    f'<span class="plate" data-in="{t + 0.1:.2f}" data-fx="pop" data-dist="40"{ANIM}>Полное видео на YouTube: {esc(ch)}</span></div>')
         print('  ВНИМАНИЕ: config.json → tiktok_channel не задан — на карточке «ИЩИ ПО НАЗВАНИЮ ↑», имя канала не выдумывать')
-        return (dim + f'<div class="end tiktok"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40">ПОЛНОЕ ВИДЕО НА YOUTUBE</span>'
-                + img + f'<span class="plate" data-in="{t + 0.7:.2f}" data-fx="pop" data-dist="40">ИЩИ ПО НАЗВАНИЮ ↑</span></div>')
+        return (dim + f'<div class="end tiktok"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>ПОЛНОЕ ВИДЕО НА YOUTUBE</span>'
+                + img + f'<span class="plate" data-in="{t + 0.7:.2f}" data-fx="pop" data-dist="40"{ANIM}>ИЩИ ПО НАЗВАНИЮ ↑</span></div>')
     if ctx.mode == 'reels':    # CTA: write the code word in the comments
         word = esc(reels_word(ctx, spec))
-        return (dim + f'<div class="end reels"><span class="plate" data-in="{t + 0.1:.2f}" data-fx="pop" data-dist="40">Напиши <span class="or">«{word}»</span></span>'
-                f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40">в комментариях</span>'
-                f'<span class="plate w" data-in="{t + 0.8:.2f}" data-fx="slide-left" data-dist="40">и я пришлю тебе</span>'
-                f'<span class="plate w" data-in="{t + 0.95:.2f}" data-fx="slide-left" data-dist="40">полный урок</span></div>')
-    return (dim + f'<div class="end"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40">{e.get("kicker", "ПОЛНОЕ ВИДЕО")}</span>'
-            f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40">{e.get("line", "В ПРОФИЛЕ ↑")}</span></div>')
+        return (dim + f'<div class="end reels"><span class="plate" data-in="{t + 0.1:.2f}" data-fx="pop" data-dist="40"{ANIM}>Напиши <span class="or">«{word}»</span></span>'
+                f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40"{ANIM}>в комментариях</span>'
+                f'<span class="plate w" data-in="{t + 0.8:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>и я пришлю тебе</span>'
+                f'<span class="plate w" data-in="{t + 0.95:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>полный урок</span></div>')
+    return (dim + f'<div class="end"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>{e.get("kicker", "ПОЛНОЕ ВИДЕО")}</span>'
+            f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40"{ANIM}>{e.get("line", "В ПРОФИЛЕ ↑")}</span></div>')
 
 
 def build_html(ctx, spec, pl, wd, suffix=''):
@@ -431,16 +438,16 @@ def main(argv=None):
         mov = wd / f'gfx{suffix}.mov'
         if not a.no_render or not mov.exists():
             R.render(html, fr(pl['total'] + ctx.end_dur), mov)
-        final = out / f"{sid}_{spec['slug']}.mp4"
-        rep = R.mix(ctx, spec, pl, wd, final, mov)
-        shutil.copy(final, wd / f'final{suffix}.mp4')
+        wfinal = wd / f'final{suffix}.mp4'
+        rep = R.mix(ctx, spec, pl, wd, wfinal, mov)
+        (wd / f'report{suffix}.json').write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding='utf-8')
+        final = wfinal
         T = pl['total'] + ctx.end_dur
         ts = [0.5, 1.5] + [min(pl['total'] - 0.5, x) for x in (5, 12, 20, 30, 40)] + [pl['total'] + 1.5, T - 0.5]
         R.preview_frames(wd, final, sorted(set(round(x, 2) for x in ts if 0 <= x < T)))
-        (wd / f'report{suffix}.json').write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding='utf-8')
+        final = R.deliver(wfinal, out / f"{sid}_{spec['slug']}.mp4", rep)     # out of norm -> exit 1, stays in work/
         print(f"  -> {final}  I={rep['final_I']} LUFS TP={rep['final_TP']}  (голос до: {rep['voice_lufs_pre']:.1f}"
-              + (f", музыка {rep['gain_music']:+.1f} dB" if rep['gain_music'] is not None else ', без музыки') + ')'
-              + ('' if rep['in_norm'] else '  ВНЕ НОРМЫ (−14 ±0.5 LUFS, TP ≤ −1.1)'))
+              + (f", музыка {rep['gain_music']:+.1f} dB" if rep['gain_music'] is not None else ', без музыки') + ')')
 
 
 if __name__ == '__main__':
