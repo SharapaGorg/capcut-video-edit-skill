@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- Пример (образец): сплит — левая половина сплошная #0A0A0A (въезд/выезд 400 мс), справа камера, сдвинутая вправо
+     (apply_graphics: Position X +0.3 = 35–85 % ширины исходника). Две «страницы»: цифры, потом список по словам.
+     Текст — нейтральная заглушка. -->
+<html lang="ru"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../../scripts/graphics/html/base.css">
+<link rel="stylesheet" href="../../../scripts/graphics/html/gfx.css">
+<script src="../../../scripts/graphics/html/anim.js"></script>
+<style>
+  .page { position: absolute; left: 96px; top: 0; width: 770px; height: 1080px; }
+  .k { position: absolute; top: 96px; left: 0; }
+  .big { position: absolute; left: 0; font-size: 220px; }
+  .lbl { position: absolute; left: 0; }
+  .lbl .plate { font-size: 32px; padding: 14px 20px 17px; }
+  .rows { position: absolute; left: 0; top: 190px; width: 770px; }
+  .rows .row { padding: 24px 0; }
+  .rows .row .t { font-size: 32px; }
+</style></head>
+<body>
+  <div class="panel" data-in="0" data-out="15.6" data-fx="slide-left" data-dur="0.4" data-odur="0.4" data-dist="960">
+    <div class="page">
+      <div class="k kicker" data-in="0.5" data-out="7.2" data-fx="slide-up">что сделаем</div>
+      <div class="big" style="top:170px" data-in="1.9" data-out="7.2" data-fx="pop" data-dist="40">10</div>
+      <div class="lbl" style="top:410px" data-in="2.2" data-out="7.2" data-fx="slide-left"><span class="plate">примеров</span></div>
+      <div class="big" style="top:500px" data-in="4.5" data-out="7.2" data-fx="pop" data-dist="40"><span data-count-from="10" data-count-to="100" data-cin="4.5" data-cdur="0.5">100</span></div>
+      <div class="lbl" style="top:740px" data-in="5.1" data-out="7.2" data-fx="slide-left"><span class="plate">вариантов</span></div>
+    </div>
+    <div class="page">
+      <div class="k kicker" data-in="7.6" data-out="15.4" data-fx="slide-up">по шагам</div>
+      <div class="rows">
+        <div class="row" data-in="9.4" data-out="15.4" data-fx="slide-left" data-dist="30"><span class="n">01</span><span class="t">первый шаг</span></div>
+        <div class="row" data-in="10.3" data-out="15.4" data-fx="slide-left" data-dist="30"><span class="n">02</span><span class="t">второй — <span class="or">главный</span></span></div>
+        <div class="row" data-in="11.3" data-out="15.4" data-fx="slide-left" data-dist="30"><span class="n">03</span><span class="t">третий шаг</span></div>
+      </div>
+    </div>
+  </div>
+</body></html>

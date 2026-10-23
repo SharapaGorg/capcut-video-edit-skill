@@ -35,8 +35,7 @@ FOCUS_MIN, FOCUS_GAP = 2.0, 8.0
 PUSH_RAMP, PUSH_SCALE, PUSH_MIN_LEFT, PUSH_EVERY = 2.5, 1.1, 3.0, 120.0
 PUNCH_SCALE = 1.15
 VOICE_WIN = 5.0
-AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
-SFX_TRACK = "SFX"
+SFX_TRACK = effects.SFX_TRACK
 
 
 def focus_pos(center, s: float, base: float, w: int, h: int) -> tuple[float, float]:
@@ -49,18 +48,7 @@ def focus_pos(center, s: float, base: float, w: int, h: int) -> tuple[float, flo
 
 
 def sfx_files(cfg, spec: dict) -> list[Path]:
-    if not cfg.sfx_dir:
-        raise SystemExit("config.json → sfx_dir не задан: укажите папку со звуками SFX (вуши/клики) — "
-                         "init_video.py --sfx DIR или поле sfx_dir в config.json")
-    d = Path(cfg.sfx_dir)
-    if not d.is_dir():
-        raise SystemExit(f"sfx_dir не найден: {d}")
-    names = spec.get("sfx")
-    files = [d / n for n in names] if names else sorted(p for p in d.iterdir() if p.suffix.lower() in AUDIO_EXT)[:3]
-    missing = [str(p) for p in files if not p.is_file()]
-    if missing or not files:
-        raise SystemExit(f"SFX не найдены в {d}: {missing or 'нет аудиофайлов'}")
-    return files
+    return effects.sfx_files(cfg, spec.get("sfx"))
 
 
 def screencast_track(cfg, d: dict) -> dict:
@@ -194,9 +182,7 @@ def run(cfg, spec: dict, dry: bool, guard_seconds: float = 5) -> dict:
     # ---- SFX ----
     if focus:
         if sfx_track is None:
-            sfx_track = {"id": common.new_id(), "type": "audio", "flag": 0, "attribute": 0, "name": SFX_TRACK,
-                         "is_default_name": False, "segments": []}
-            d["tracks"].append(sfx_track)
+            sfx_track = effects.new_sfx_track(d)
         prev = None
         lens = {}
         for i, z in enumerate(focus):

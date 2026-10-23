@@ -38,12 +38,13 @@
 ## Рендер
 - Разрешение и fps = проект.
 - Только HTML → Playwright → MOV ProRes 4444 с альфой (graphics.md). Remotion, PIL, текст CapCut — запрещены.
-- Сначала одна тестовая (самая сложная) → вставить → **стоп**: я проверяю в CapCut прозрачность и вид. После «ок» — остальные, в фоне.
-- Файлы: illustrations/NN_тип.mov; исходники HTML — рядом, comps.json.
+- Сначала одна тестовая (самая сложная) → preview png → вставить → **стоп**: я проверяю в CapCut прозрачность и вид. После «ок» — остальные, в фоне (процедура и команды — graphics.md).
+- Таблица → `graphics/items.json` (формат — graphics.md). Файлы: `graphics/html/<id>.html`, `graphics/comps.json`, `graphics/out/<id>.mov`, `graphics/render_meta.json`, `graphics/graphics_applied.json`.
+- SFX под входы — `apply_sfx.py` (голос −12 LU).
 
 ## Проверка
 - VALIDATION.md.
 - Каждая есть в таблице, таймкоды совпадают.
-- ffprobe: у MOV есть альфа-канал.
+- ffprobe: у MOV есть альфа-канал (render_meta.json → pix_fmt yuva…, problems пусто).
 - Кадр из середины каждой поверх видео (png): шрифт Unbounded, цвета по rules.md, кружок и область, о которой речь, не перекрыты.
 - Длительность по правилам тайминга.

@@ -27,8 +27,9 @@ from apply_zooms import FOCUS_GAP, FOCUS_MIN, VOICE_WIN  # noqa: E402
 MARGIN, CIRCLE_MARGIN, OCR_NEAR = 40, 60, 250
 
 
-def circle_geometry(cfg, d: dict) -> tuple[float, float, float] | None:
-    """(cx, cy, r) canvas px of the camera circle: clip transform/scale + mask config of the first circle piece."""
+def circle_clip(cfg, d: dict) -> dict | None:
+    """Camera circle of the project: {cx, cy, r} canvas px + {sx, tx, ty} clip scale/transform of the first circle
+    piece (clip transform/scale + mask config). None without a circle."""
     import apply_layout
     try:
         t = apply_layout.circle_track(cfg, d)
@@ -47,8 +48,14 @@ def circle_geometry(cfg, d: dict) -> tuple[float, float, float] | None:
             W, H = cfg.width, cfg.height
             cx = W / 2 * (1 + tx) + float(mc_.get("centerX", 0)) * W * sx
             cy = H / 2 * (1 - ty) - float(mc_.get("centerY", 0)) * H * sx
-            return cx, cy, float(mc_.get("width", 0.4)) * W * sx / 2
+            return {"cx": cx, "cy": cy, "r": float(mc_.get("width", 0.4)) * W * sx / 2, "sx": sx, "tx": tx, "ty": ty}
     return None
+
+
+def circle_geometry(cfg, d: dict) -> tuple[float, float, float] | None:
+    """(cx, cy, r) canvas px of the camera circle."""
+    c = circle_clip(cfg, d)
+    return (c["cx"], c["cy"], c["r"]) if c else None
 
 
 def visible(pos, s, W, H):

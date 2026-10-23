@@ -175,6 +175,29 @@ def write_meta(cfg: Config, meta: dict, dry: bool) -> None:
         _dump(cfg.project_dir / "draft_meta_info.json", meta)
 
 
+_CNEW_TPL = Path(__file__).resolve().parent.parent / "templates" / "capcut_new" / "templates.json"
+
+
+def add_meta_material(meta: dict, path, duration_us: int, width: int, height: int, metetype: str = "video") -> dict:
+    """An imported-media entry (draft_materials type 0, as CapCut's import makes it) for path; an entry with the same
+    file_Path is replaced, so a re-run adds nothing. Returns the entry."""
+    tpl = json.loads(_CNEW_TPL.read_text(encoding="utf-8"))["meta_material"]
+    p = Path(path)
+    now = time.time()
+    mm = copy.deepcopy(tpl)
+    mm.update(id=str(uuid.uuid4()), file_Path=p.as_posix(), extra_info=p.name, duration=int(duration_us),
+              width=int(width), height=int(height), metetype=metetype,
+              create_time=int(p.stat().st_mtime) if p.exists() else int(now), import_time=int(now),
+              import_time_ms=int(now * 1e6), roughcut_time_range={"start": 0, "duration": int(duration_us)})
+    groups = meta.setdefault("draft_materials", [])
+    g0 = next((g for g in groups if g.get("type") == 0), None)
+    if g0 is None:
+        g0 = {"type": 0, "value": []}
+        groups.insert(0, g0)
+    g0["value"] = [v for v in g0.get("value", []) if v.get("file_Path") != mm["file_Path"]] + [mm]
+    return mm
+
+
 # ---- source files ----
 ROLE_DIRS = (("camera", "camera"), ("screencast", "screencasts"), ("voice", "voice"))
 

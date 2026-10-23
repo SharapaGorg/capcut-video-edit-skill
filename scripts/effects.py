@@ -9,6 +9,7 @@ constant_material_id differ, so they are not kept equal). Nothing is added to th
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import re
 import subprocess
@@ -305,6 +306,108 @@ def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | 
         return None
     lu = loudness(buf, sr)["I"]
     return None if lu <= -69.9 else lu
+
+
+# ---- SFX files and tracks (stage 6 zooms, stages 7–8 graphics) ----
+AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
+SFX_TRACK = "SFX"
+
+
+def sfx_files(cfg, names=None, n: int = 3) -> list[Path]:
+    """SFX files in cfg.sfx_dir: the given names, else the first n audio files there (sorted).
+    SystemExit with what to do when sfx_dir is unset / missing / has no such files."""
+    if not cfg.sfx_dir:
+        raise SystemExit("config.json → sfx_dir не задан: укажите папку со звуками SFX (вуши/клики) — "
+                         "init_video.py --sfx DIR или поле sfx_dir в config.json")
+    d = Path(cfg.sfx_dir)
+    if not d.is_dir():
+        raise SystemExit(f"sfx_dir не найден: {d}")
+    files = [d / x for x in names] if names else sorted(p for p in d.iterdir() if p.suffix.lower() in AUDIO_EXT)[:n]
+    missing = [str(p) for p in files if not p.is_file()]
+    if missing or not files:
+        raise SystemExit(f"SFX не найдены в {d}: {missing or 'нет аудиофайлов'}")
+    return files
+
+
+def new_sfx_track(draft: dict, name: str = SFX_TRACK) -> dict:
+    t = {"id": new_id(), "type": "audio", "flag": 0, "attribute": 0, "name": name, "is_default_name": False,
+         "segments": []}
+    draft["tracks"].append(t)
+    return t
+
+
+def sfx_tracks(draft: dict) -> list[dict]:
+    """Audio tracks named SFX, SFX 2, … (in draft order)."""
+    return [t for t in draft["tracks"] if t["type"] == "audio" and re.fullmatch(rf"{SFX_TRACK}( \d+)?", t.get("name") or "")]
+
+
+def file_len_us(path) -> int:
+    return int(round(len(pcm(path)) * 1e6 / SR))
+
+
+def place_sfx(draft: dict, path, start_us: int, volume: float, length_us: int) -> tuple[str, dict]:
+    """An SFX segment at start_us on the first SFX track where it fits (nothing playing at start_us; trimmed to the
+    next segment's start), else on a new track «SFX N». material.duration = the file length. -> (segment id, track)."""
+    tracks = sfx_tracks(draft)
+    for t in tracks:
+        if any(s["target_timerange"]["start"] <= start_us < common.seg_end(s) for s in t["segments"]):
+            continue
+        nxt = min((s["target_timerange"]["start"] for s in t["segments"] if s["target_timerange"]["start"] > start_us),
+                  default=None)
+        dur = length_us if nxt is None else min(length_us, nxt - start_us)
+        if dur * 2 >= length_us:            # at least half of the sound fits
+            break
+    else:
+        t = new_sfx_track(draft, SFX_TRACK if not tracks else f"{SFX_TRACK} {len(tracks) + 1}")
+        dur = length_us
+    sid = sfx_segment(draft, t, Path(path).as_posix(), start_us, dur, volume)
+    t["segments"] = common.by_start(t["segments"])
+    seg = next(s for s in t["segments"] if s["id"] == sid)
+    common.index(draft["materials"])[seg["material_id"]][1]["duration"] = length_us
+    return sid, t
+
+
+# ---- overlay video (graphics MOV) ----
+CNEW = Path(__file__).resolve().parent.parent / "templates" / "capcut_new" / "templates.json"
+V_EXTRAS = [("speeds", "speed"), ("placeholder_infos", "placeholder"), ("canvases", "canvas"),
+            ("sound_channel_mappings", "sound_channel"), ("material_colors", "material_color"),
+            ("vocal_separations", "vocal_separation")]
+CLIP_FULL = {"scale": {"x": 1.0, "y": 1.0}, "rotation": 0.0, "transform": {"x": 0.0, "y": 0.0},
+             "flip": {"vertical": False, "horizontal": False}, "alpha": 1.0}
+
+
+@functools.lru_cache(maxsize=1)
+def _cnew() -> dict:
+    return json.loads(CNEW.read_text(encoding="utf-8"))
+
+
+def overlay_video_segment(draft: dict, track: dict, path, start_us: int, duration_us: int, width: int,
+                          height: int) -> tuple[dict, dict]:
+    """A video material (has_audio false: graphics MOV with alpha) + a full-frame segment at start_us on track, from
+    the capcut_new templates (V_EXTRAS cloned per segment, volume 0, no mask, no colour). -> (segment, material)."""
+    T = _cnew()
+    p = Path(path).as_posix()
+    mat = copy.deepcopy(T["video"])
+    mat.update(id=new_id(), path=p, material_name=Path(p).name, duration=int(duration_us), width=int(width),
+               height=int(height), has_audio=False)
+    M = draft["materials"]
+    M.setdefault("videos", []).append(mat)
+    refs = []
+    for key, tk in V_EXTRAS:
+        m = copy.deepcopy(T[tk])
+        m["id"] = new_id()
+        M.setdefault(key, []).append(m)
+        refs.append(m["id"])
+    seg = copy.deepcopy(T["video_segment"])
+    ti = draft["tracks"].index(track) if track in draft["tracks"] else 0
+    seg.update(id=new_id(), material_id=mat["id"], extra_material_refs=refs, speed=1.0, volume=0.0,
+               last_nonzero_volume=1.0, source_timerange={"start": 0, "duration": int(duration_us)},
+               target_timerange={"start": int(start_us), "duration": int(duration_us)}, common_keyframes=[],
+               keyframe_refs=[], clip=copy.deepcopy(CLIP_FULL), uniform_scale={"on": True, "value": 1.0},
+               enable_video_mask=False, enable_adjust=False, enable_hsl=False, track_attribute=0,
+               render_index=ti, track_render_index=ti)
+    track.setdefault("segments", []).append(seg)
+    return seg, mat
 
 
 def sfx_volume(voice_lu: float, sfx_path, offset_lu: float = SFX_LU, max_volume: float = 10.0) -> dict:

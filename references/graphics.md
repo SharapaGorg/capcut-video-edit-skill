@@ -3,20 +3,76 @@
 Единственный разрешённый путь. Текст CapCut (materials.texts), PIL/numpy-рендеры, Remotion, геометрия «на глаз» по коэффициентам px/size — запрещены. Хочется другой инструмент → вопрос пользователю (Стоп), не своё решение.
 
 ## Пайплайн
-1. Композиция = HTML-файл 1920×1080 с прозрачным фоном, стили `scripts/graphics/html/base.css` (шрифт Unbounded из `assets/Unbounded-var.ttf`, плашки) + `gfx.css` (классы `.plate .num .sq .tile .arrow .hrow .vcol .it .dim .card .wall .name`), иконки `icons.js` (`<i data-icon="...">`).
-2. Анимация — `anim.js`: детерминированная, по времени. `window.seek(t)` расставляет стили всем элементам с `data-in`.
-   - `data-in` — момент появления, с; `data-out` — начало выхода (необяз.).
-   - `data-fx` — вход: `slide-left|slide-right|slide-up|slide-down|pop|cut|wipe-left|wipe-right|wipe-up|wipe-down|grow-x` (по умолчанию slide-up); `data-ofx` — выход (по умолчанию обратный вход).
-   - `data-dur`, `data-odur`, `data-dist`. По умолчанию в anim.js 0.22 с / 28 px — задать 0.25 с / 20 px (появление 250 мс, сдвиг 20 px, исчезновение 200 мс). Ease-out cubic.
-3. `scripts/graphics/gfx_build.py` — описание композиций (`comp(id, start, end, body)`) → HTML + `comps.json` (id, файл, начало/конец на таймлайне).
-4. `scripts/graphics/render.py` читает `comps.json`: Playwright Chromium, покадровые прозрачные скриншоты (`seek(frame/fps)`) → ffmpeg `prores_ks -profile:v 4444 -pix_fmt yuva444p10le` → `.mov` с альфой.
-5. `scripts/graphics/preview.py` — кадры поверх реального фона (кадр исходника по timeline_map) → png для проверки.
-6. `scripts/graphics/apply_graphics.py` (идемпотентный) — MOV как видеоклипы на дорожку графики; `apply_sfx.py` — SFX под входы.
-7. Проверка: ffprobe — альфа (yuva); кадр из середины каждой поверх видео — шрифт, цвета, кружок и область, о которой речь, не перекрыты.
+1. Композиция = HTML-страница 1920×1080 с прозрачным фоном (проект 16:9; другое разрешение = масштаб страницы). Стили `scripts/graphics/html/base.css` (шрифт Unbounded из `assets/Unbounded-var.ttf`, плашки) + `gfx.css` (зоны `.pos-*`, классы `.plate .num .sq .tile .arrow .hrow .vcol .it .dim .frame .card .wall .name .split`), иконки `icons.js` (`<i data-icon="...">`).
+2. Анимация — `anim.js`: детерминированная, по времени. `window.seek(t)` расставляет стили всем элементам с `data-in`; `window.visibleBox()` — рамка видимого (без переходов) для проверки размещения.
+   - `data-in` — момент появления, с от начала композиции; `data-out` — начало выхода (необяз.).
+   - `data-fx` — вход: `slide-left|slide-right|slide-up|slide-down|fade|pop|cut|wipe-left|wipe-right|wipe-up|wipe-down|grow-x` (по умолчанию slide-up); `data-ofx` — выход (по умолчанию обратный вход).
+   - По умолчанию `data-dur` 0.25 (появление 250 мс), `data-odur` 0.2 (исчезновение 200 мс), `data-dist` 20 px. Сплит/заставка — 0.4 / 0.4 (сдвиг 400 мс). Ease-out cubic.
+3. `gfx_build.py --config C --spec graphics/items.json` — проверяет правила (ниже), пишет `graphics/html/<id>.html` + `graphics/comps.json`. Нарушение → отказ со списком, ничего не пишется.
+4. `render.py --config C [--only ID ...]` — Playwright Chromium, покадровые прозрачные скриншоты (`seek(frame/fps)`) → ffmpeg `prores_ks -profile:v 4444 -pix_fmt yuva444p10le` → `graphics/out/<id>.mov` + `graphics/render_meta.json`. Нет Playwright → `pip install playwright && python -m playwright install chromium`.
+5. `preview.py --config C --id ID [--t SEC ...]` — кадр композиции поверх реального кадра (stage3/timeline_map.json + layout.json: F — камера, S — скринкаст + кружок) → `graphics/preview/<id>_<t>.png`.
+6. `apply_graphics.py --config C [--only ID ...] [--replace] [--dry]` (идемпотентный) — MOV на дорожку «Графика»; `apply_sfx.py --config C [--only ID ...] [--sfx FILE] [--dry]` — SFX под входы.
+7. Проверка: render_meta → pix_fmt yuva…, problems пусто; png середины каждой — шрифт, цвета, кружок и область, о которой речь, не перекрыты.
+
+## items.json (вход gfx_build)
+Список объектов; времена — секунды таймлайна (stage3/transcript_timeline.json), округляются до кадра.
+
+| Поле | Обяз. | Что |
+|---|---|---|
+| `id` | да | `[A-Za-z0-9_-]+`, уникальный; имя MOV (`graphics/out/<id>.mov`) и ключ идемпотентности |
+| `type` | да | `hook` хук · `plate` ключевая фраза (этап 8) · `card` карточка на скринкасте · `split` сплит на камере · `chapter` заставка главы · `number` цифра |
+| `start`, `end` | да | начало = первое слово −0,2 с, конец = последнее слово +0,5 с (этап 7) |
+| `text` | да | строка или список строк (строка = плашка / пункт); для `number` — само число («×40»), для `chapter` — название |
+| `accent` | нет | ключевое слово/цифры внутри `text` → #D46A40 (первое вхождение) |
+| `position` | нет | `top-left` · `top-right` · `wall` · `bottom-left` · `left`; по умолчанию — по типу и раскладке (таблица ниже) |
+| `at` | нет | время появления каждой строки (секунды таймлайна, по словам речи), по одному на строку; по умолчанию через 0,35 с |
+| `kicker` | нет | мелкая оранжевая подпись сверху (`card`, `split`) |
+| `caption` | нет | подпись под числом (`number`), ≤ 5 слов |
+| `n` | нет | номер главы (`chapter`) → «02» |
+| `sfx` | нет | имя файла в `sfx_dir` для этого элемента (по умолчанию — первый файл папки) |
+
+Позиции (px кадра 1920×1080): `top-left` x 96, y 80 · `top-right` x 1240–1860, y 110…680 · `wall` x 1250–1860, y 120–420 (стена справа от головы) · `bottom-left` x 96, низ на y 960 · `left` — левая половина (чёрная панель сплита), отступ 96.
+
+| Тип | S (скринкаст) | F (камера) | Длительность |
+|---|---|---|---|
+| hook | top-left | left | — |
+| plate | top-left | top-left | 2–5 с, ≥ 0,3 с/слово, ≤ 6 слов |
+| card | top-right | запрещено → split | 2,5–15 с, ≥ 0,3 с/слово |
+| split | запрещено | left (панель + сдвиг камеры) | 2,5–15 с |
+| chapter | top-left | left | 2,5 с, название ≤ 5 слов |
+| number | top-right | left (панель + сдвиг камеры) | 2,5–15 с, подпись ≤ 5 слов |
+
+Жёсткие правила gfx_build (отказ):
+- элемент целиком в одной раскладке (S или F по layout.json);
+- позиция из разрешённых для раскладки (S: top-left, top-right, bottom-left; F: top-left, bottom-left, wall, left); `bottom-right` — никогда (кружок);
+- оранжевое (accent, цифры number/chapter/split) на F в `wall` — нет (рядом с лицом);
+- текст на камере — только на плашке (все шаблоны кладут текст на `.plate`/панель);
+- `accent` есть в тексте; длительности по таблице;
+- элементы не пересекаются по времени (одна дорожка — совмещённое собрать в одну композицию);
+- plate/card/number не одновременно с фокус-зумом (stage6/zooms.json).
+
+После рендера, по реальной рамке видимого (`render_meta.bbox`): на S ничего в зоне кружка (x > 1480 и y > 640); plate/card/hook/chapter/number — внутри 90 % кадра; card — x 1240–1860, не ниже y 680; wall — в своей зоне; панель сплита — не шире половины; шрифт Unbounded загрузился; есть альфа. Нарушение → `render_meta.problems`, apply_graphics отказывает.
+
+## Выходные файлы
+- `graphics/comps.json`: `{id: {start, end, html, type, layout: S|F, position, panel, text, accent, n, sfx: [{t, kind: in|out|chapter}], sfx_file, sha}}` — start/end в секундах таймлайна по кадрам; `sfx.t` — момент SFX (вход элемента; у сплита ещё выход = end − 0,4); sha — хэш HTML. Слияние по id: повторный gfx_build заменяет только свои id.
+- `graphics/render_meta.json`: `{id: {file, html, sha, start, end, start_us, end_us, frames, duration, fps, pix_fmt, bbox: [x0, y0, x1, y1], font, problems: []}}`.
+- `graphics/graphics_applied.json`: `{track_id, items: {id: {segment_id, material_id, track_id, start, end, start_us, end_us, mov, sha, type, camera_segment_id?, camera_shift?}}}`.
+- `graphics/sfx_applied.json`: `{events: {"<id>:<kind>": {id, kind, start, file, volume, volume_db, voice_lufs, offset_lu, voice_measured, segment_id, track}}}`.
+
+## Вставка в проект
+- Дорожка «Графика» (video, overlay flag 2): над скринкастом, камерой F и блоками Adjustment (иначе цветокор красит графику), под кружком камеры. Создаётся при первом запуске.
+- MOV = видеоматериал `has_audio false`, весь кадр, громкость 0; запись в draft_meta_info. Текст CapCut не создаётся никогда.
+- Повторный запуск: id с уже стоящим MOV (по пути или по graphics_applied.json) пропускается — два прогона = один сегмент. Перерендер с теми же временами → `--replace`. Другие времена → откатить бэкап или удалить сегмент в CapCut, затем заново.
+- Устаревший рендер (HTML или время поменялись после render.py) → отказ «перерендерить».
+- Сплит / цифра на камере: кусок камеры под ним разрезается по краям сплита, Position X 0 → +0.3 → 0 (вход и выход 400 мс) — в правую половину попадает 35–85 % ширины исходника. На куске камеры уже есть ключи (наезд) → отказ.
+- SFX: клик на входе каждого элемента (±1 кадр), у сплита ещё на выходе; уровень голос −12 LU, заставки глав −15 LU (на 3 dB тише SFX зумов). Нет `sfx_dir` → стоп и вопрос пользователю. Уже стоящий SFX (±1 кадр) пропускается. Значения в dB — в отчёт пользователю.
 
 ## Процедура
-- Предложение (таблица этапа 7/8) → **одна тестовая** (самая сложная) → png поверх реального фона + вставка в проект → **ок пользователя в CapCut** (обязателен, не решать самому) → пачка в фоне.
-- Новая графика позже = новый `comp()` → preview → render → apply_graphics. SFX к ней — добавить отдельно.
+1. Предложение (таблица этапа 7/8) → **Стоп**, утверждение → `graphics/items.json`.
+2. **Тест-композиция**: одна, самая сложная (сплит или карточка с наибольшим числом строк): `gfx_build.py` → `render.py --only ID` → `preview.py --id ID` (png посмотреть самому: шрифт, кружок, область) → `apply_graphics.py --only ID` (+ `apply_sfx.py --only ID`).
+3. **Ок пользователя в CapCut** — обязателен, не решать самому даже при делегированной автономии: прозрачность, вид, тайминг. Правки → items/HTML → gfx_build → render → `apply_graphics --replace`.
+4. **Пачка** после «ок»: `render.py` (все, в фоне — долго) → `preview.py` выборочно → `apply_graphics.py` → `apply_sfx.py` → проверки этапа.
+- Новая графика позже = новый элемент в items.json → gfx_build → render --only → preview → apply_graphics --only → apply_sfx --only.
 - Звук внутри MOV не нужен; SFX — отдельной дорожкой. Белый шум «шуршание» не использовать.
 
 ## Стиль «Монолит»
@@ -55,4 +111,4 @@
 - Значения в dB сообщать пользователю, он может поправить.
 
 ## Образцы
-- `assets/examples/html/{hook,split,wipe_ch2,card}.html`.
+- `assets/examples/html/{hook,split,wipe_chapter,card}.html` — образцы ручной композиции (пример, текст-заглушка): хук с цифрами, сплит в две страницы, заставка со шторкой, карточка на скринкасте. Открыть в браузере, `seek(t)` в консоли.

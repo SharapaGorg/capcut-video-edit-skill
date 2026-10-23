@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- Пример (образец): заставка главы со шторкой — чёрная шторка 0.2 с, затем номер (#D46A40 цифрами) и название
+     белым на плашках, 2.5 с, левый верх. Текст — нейтральная заглушка. -->
+<html lang="ru"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../../scripts/graphics/html/base.css">
+<link rel="stylesheet" href="../../../scripts/graphics/html/gfx.css">
+<script src="../../../scripts/graphics/html/anim.js"></script>
+<style>
+  .bar { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #0A0A0A; }
+  .ch { position: absolute; left: 110px; top: 110px; }
+</style></head>
+<body>
+  <div class="bar" data-in="0" data-out="0.2" data-fx="wipe-left" data-ofx="wipe-right" data-dur="0.2" data-odur="0.25"></div>
+  <div class="ch chapter stack">
+    <span class="plate num" data-in="0.3" data-out="2.1" data-fx="slide-left" data-dur="0.4" data-odur="0.4" data-dist="60">02</span>
+    <span class="plate title" data-in="0.4" data-out="2.1" data-fx="slide-left" data-dur="0.4" data-odur="0.4" data-dist="60">название</span>
+    <span class="plate title" data-in="0.5" data-out="2.1" data-fx="slide-left" data-dur="0.4" data-odur="0.4" data-dist="60">главы</span>
+  </div>
+</body></html>

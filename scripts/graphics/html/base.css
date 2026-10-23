@@ -1,0 +1,20 @@
+/* Style «Монолит» (references/graphics.md). Colours: #0A0A0A plates (85 %), #FFFFFF text, #D46A40 accent only for
+   the key word, arrows, frames and digits — never a fill. White plate + black text = the allowed second level. */
+@font-face { font-family: 'Unbounded'; src: url('../../../assets/Unbounded-var.ttf') format('truetype'); font-weight: 200 900; }
+html, body { margin: 0; padding: 0; background: transparent; }
+body { width: 1920px; height: 1080px; overflow: hidden; position: relative; font-family: 'Unbounded', sans-serif;
+       -webkit-font-smoothing: antialiased; color: #FFFFFF; }
+.abs { position: absolute; }
+.plate { display: inline-block; background: rgba(10, 10, 10, 0.85); color: #FFFFFF; font-weight: 800; line-height: 1;
+         white-space: nowrap; text-transform: uppercase; }
+.plate.w { background: #FFFFFF; color: #0A0A0A; }
+.or { color: #D46A40; }
+.plate.w .or { color: #0A0A0A; text-decoration: underline 4px #D46A40; }
+.stack { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.panel { position: absolute; left: 0; top: 0; width: 960px; height: 1080px; background: #0A0A0A; }
+.kicker { color: #D46A40; font-weight: 700; font-size: 20px; letter-spacing: .12em; text-transform: uppercase; }
+.big { color: #D46A40; font-weight: 900; line-height: 1; letter-spacing: -.04em; }
+.row { display: flex; align-items: baseline; padding: 22px 0; border-top: 2px solid #FFFFFF; }
+.row .n { color: #D46A40; font-weight: 800; font-size: 26px; width: 70px; flex: none; }
+.row .t { color: #FFFFFF; font-weight: 600; font-size: 30px; line-height: 1.25; text-transform: uppercase; }
+[data-in] { will-change: transform, opacity; }
