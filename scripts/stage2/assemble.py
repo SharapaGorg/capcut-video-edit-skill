@@ -1,6 +1,6 @@
 """Stage 2 §7: assemble the «свалка» into the working structure, in one go.
 
-    python -X utf8 scripts/stage2/assemble.py --config config.json [--dry] [--resync]
+    python -X utf8 scripts/stage2/assemble.py --config config.json [--dry] [--resync] [--prerender]
 
 Material is identified by source folder (cfg.sources: camera / screencasts / voice), never by track index.
  0. sync: <work_dir>/layout/assembly.json "pairs" (camera_time = voice_time + offset_us) — computed by
@@ -11,11 +11,14 @@ Material is identified by source folder (cfg.sources: camera / screencasts / voi
  2. compounds: mic -> 1 (audio), screencast -> 1, circle -> 1, full-screen camera -> 1 per F stretch
     (on the main track where it is free, else on the overlay track «Камера F»);
  3. camera volume 0 (outer and nested); voice: Voice Crisper + Reduce noise on the mic and screencast
-    compounds, mic +4.5 dB (only when voice/ exists);
+    compounds; the mic compound volume matches the mic to the screencast voice (integrated LUFS of both, ±1 LU;
+    effects.match_mic; +4.5 dB only when nothing can be measured), the chosen dB is printed;
  4. Adjustment block over every F stretch (continuous, over camera only); Adjust (Temp -18 / Sat 10) on the
     circle compound segment;
- 5. writes both draft files, subdraft/, draft_meta_info, mic pre-render, cfg.compounds in config.json, and
-    the result into assembly.json "assembled".
+ 5. writes both draft files, subdraft/, draft_meta_info, cfg.compounds in config.json, and the result into
+    assembly.json "assembled". The mic compound has NO pre-render by default (audio_path "": CapCut renders it
+    itself, with fades/volume as it plays them); --prerender makes Resources/combination/<cid>_audio.aac with
+    ffmpeg (opt-in: it ignores volume keyframes/fades).
 """
 from __future__ import annotations
 
@@ -32,7 +35,7 @@ import effects  # noqa: E402
 import make_compound as mc  # noqa: E402
 from common import index, new_id, seg_end, source_role, subtract_ranges, us  # noqa: E402
 
-MIC_GAIN = 10 ** (4.5 / 20)
+MIC_GAIN = 10 ** (effects.MIC_REF_DB / 20)   # fallback only (effects.match_mic)
 CNEW = Path(__file__).resolve().parent.parent.parent / "templates" / "capcut_new" / "templates.json"
 V_EXTRAS = [("speeds", "speed"), ("placeholder_infos", "placeholder"), ("canvases", "canvas"),
             ("sound_channel_mappings", "sound_channel"), ("material_colors", "material_color"),
@@ -275,13 +278,16 @@ def assemble(cfg, draft: dict, pairs: list[dict], f_ranges: list[tuple[int, int]
         effects.attach(c.outer, effects.make("reduce_noise", draft, cache_root=cache_root))
         made.append(c)
         comp[key] = c.nid
+    gain = effects.match_mic(cfg, draft, [next(c for c in made if c.nid == comp["mic"]).outer], log=log) \
+        if comp["mic"] else None
     for i, t in enumerate(draft["tracks"]):
         for s in t["segments"]:
             if t["type"] == "video":
                 s["render_index"] = s["track_render_index"] = i
     draft["duration"] = max((seg_end(s) for t in draft["tracks"] for s in t["segments"]), default=draft["duration"])
     report = {"compounds": comp, "f_stretches_us": [list(r) for r in stretches], "circle_pieces": len(circle),
-              "f_pieces": len(fpieces), "unsynced": sorted(unsynced), "mic_gain": MIC_GAIN if comp["mic"] else None,
+              "f_pieces": len(fpieces), "unsynced": sorted(unsynced), "mic_gain": gain["volume"] if gain else None,
+              "mic_gain_db": gain["db"] if gain else None, "mic_gain_measured": gain["measured"] if gain else None,
               "duration_us": draft["duration"]}
     return {"compounds": comp, "made": made, "f": stretches, "report": report}
 
@@ -327,7 +333,7 @@ def get_pairs(cfg, resync: bool, log=print) -> list[dict]:
 
 
 def run(cfg, dry: bool, cache_root=None, guard_seconds: float = 5, resync: bool = False, log=print,
-        allow_unsynced: bool = False) -> dict:
+        allow_unsynced: bool = False, prerender: bool = False) -> dict:
     draft = common.read_draft(cfg)
     classify(cfg, draft)  # before the (slow) sync
     pairs = get_pairs(cfg, resync, log)
@@ -348,7 +354,7 @@ def run(cfg, dry: bool, cache_root=None, guard_seconds: float = 5, resync: bool 
     common.write_draft(cfg, draft, "assemble", dry=False, guard_seconds=guard_seconds,
                        subdrafts={c.nid: c.wrapper for c in res["made"]})
     for c in res["made"]:
-        if c.kind == "audio":
+        if c.kind == "audio" and prerender:   # default: audio_path "" — CapCut renders the compound itself
             mc.prerender_audio(cfg.project_dir, c, log=log)
     mc.write_files(cfg, res["made"])
     common.save_config_field(cfg, "compounds", res["compounds"])
@@ -368,10 +374,12 @@ def main(argv=None):
     ap.add_argument("--resync", action="store_true", help="recompute camera sync (layout/xcorr.py)")
     ap.add_argument("--allow-unsynced", action="store_true",
                     help="assemble even if some voice files have no camera sync (they get no camera)")
+    ap.add_argument("--prerender", action="store_true",
+                    help="pre-render the mic compound audio with ffmpeg (default: none, CapCut renders it)")
     a = ap.parse_args(argv)
     cfg = common.load_config(a.config)
     try:
-        run(cfg, a.dry, resync=a.resync, allow_unsynced=a.allow_unsynced)
+        run(cfg, a.dry, resync=a.resync, allow_unsynced=a.allow_unsynced, prerender=a.prerender)
     except NothingToAssemble as e:
         print(f"nothing to assemble: {e}")
     except effects.EffectCacheMissing as e:

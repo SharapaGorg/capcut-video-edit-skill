@@ -342,6 +342,54 @@ def voice_lufs(cfg, draft: dict, a_us: int, b_us: int, sr: int = SR) -> float | 
     return None if lu <= -69.9 else lu
 
 
+MIC_REF_DB = 4.5      # rules.md: +4.5 dB of the reference — the mic mp3 only, a fallback when nothing can be measured
+MIC_TOL_LU = 1.0      # mic = screencast ±1 LU
+MAX_VOLUME = 10.0     # CapCut volume ceiling (+20 dB)
+
+
+def role_lufs(cfg, draft: dict, role: str, sr: int = SR) -> float | None:
+    """Integrated LUFS of one voice source as heard on the timeline: its leaf pieces with volume > 0 at speed 1,
+    each x its volume (compound chain included), concatenated (no timeline-long buffer). None if nothing to measure
+    (no pieces, no audio stream, digital silence)."""
+    import numpy as np
+    parts = []
+    for p in common.flatten(cfg, draft, (role,)):
+        if p["volume"] <= 0 or abs(p["speed"] - 1.0) > 1e-6 or p["src"] is None or p["dur"] <= 0:
+            continue
+        a = pcm(p["path"], p["src"] / 1e6, p["dur"] / 1e6, sr)
+        if len(a):
+            parts.append(a * float(p["volume"]))
+    if not parts:
+        return None
+    lu = loudness(np.concatenate(parts), sr)["I"]
+    return None if lu is None or lu <= -69.9 else lu
+
+
+def match_mic(cfg, draft: dict, mic_segs: list[dict], log=print) -> dict:
+    """Set the volume of the mic compound segment(s) so the mic matches the screencast voice (rules.md «Звук»:
+    ±1 LU): both measured with role_lufs at mic volume 1.0; gain = screencast − mic (capped at +20 dB). Nothing
+    measurable (no screencast audio / no mic audio) -> the +4.5 dB reference (MIC_REF_DB). Mutates mic_segs.
+    -> {db, volume, measured, mic_lufs, screencast_lufs}."""
+    import math
+    for s in mic_segs:
+        s["volume"] = 1.0
+    mic = role_lufs(cfg, draft, "voice")
+    sc = role_lufs(cfg, draft, "screencast")
+    measured = mic is not None and sc is not None
+    db = round(sc - mic, 2) if measured else MIC_REF_DB
+    vol = min(10 ** (db / 20), MAX_VOLUME)
+    db = round(20 * math.log10(vol), 2)
+    for s in mic_segs:
+        s["volume"] = vol
+        s["last_nonzero_volume"] = vol
+    if measured:
+        log(f"mic {mic:.1f} LUFS, screencast {sc:.1f} LUFS -> mic compound volume {db:+.2f} dB ({vol:.4f})")
+    else:
+        log(f"mic/screencast loudness not measurable (mic {mic}, screencast {sc}) -> reference {db:+.2f} dB "
+            f"({vol:.4f})")
+    return {"db": db, "volume": vol, "measured": measured, "mic_lufs": mic, "screencast_lufs": sc}
+
+
 # ---- SFX files and tracks (stage 6 zooms, stages 7–8 graphics) ----
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 SFX_TRACK = "SFX"

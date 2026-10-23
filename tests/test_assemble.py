@@ -220,3 +220,130 @@ def test_range_helpers():
     assert common.map_through_cuts(2, [(2, 3)]) == 2
     tr = {"segments": [{"target_timerange": {"start": 0, "duration": 5}}, {"target_timerange": {"start": 7, "duration": 1}}]}
     assert common.gap_count(tr) == 1
+
+
+def _mic_first(cfg):
+    """Dump as recorded: the mic (voice/) in the intro, the screencasts after it — shift the screencast track."""
+    d = common.read_draft(cfg)
+    ix = common.index(d["materials"])
+    vdur = max(common.seg_end(s) for t in d["tracks"] if t["type"] == "audio" for s in t["segments"])
+    for t in d["tracks"]:
+        for s in t["segments"]:
+            if common.source_role(cfg, common.mat_path(ix, s)) == "screencast":
+                s["target_timerange"]["start"] += vdur
+    d["duration"] = max(common.seg_end(s) for t in d["tracks"] for s in t["segments"])
+    common.write_draft(cfg, d, "test", dry=False, guard_seconds=0)
+    return vdur
+
+
+def test_assemble_with_voice(dump, cache):
+    """I1: the mic path: mic compound (audio) with Crisper + Reduce noise and the +4.5 dB reference (the fixture
+    screencasts have no audio -> nothing to match against), F from the mic pieces with Adjustment over it,
+    cfg.compounds.mic, no pre-render by default (audio_path "": CapCut renders it)."""
+    import assemble
+    proj, cp = dump({"screencasts": ["sc1.mp4", "sc2.mp4"], "camera": ["cam1.mp4"], "voice": ["voice.m4a"]},
+                    [pair("voice.m4a", "cam1.mp4"), pair("sc1.mp4", "cam1.mp4"), pair("sc2.mp4", "cam1.mp4")])
+    cfg = common.load_config(str(cp))
+    vdur = _mic_first(cfg)
+    rep = assemble.run(cfg, dry=False, cache_root=cache, guard_seconds=0)
+    comp = json.loads(cp.read_text(encoding="utf-8"))["compounds"]
+    assert comp["mic"] and comp["screencast"] and comp["circle"] and len(comp["cam_full"]) == 1
+    d = common.read_draft(cfg)
+    assert common.check_refs(d) == [] and common.draft_overlaps(d) == []
+    ix = common.index(d["materials"])
+    mic = outer_by_compound(d, comp["mic"])
+    assert abs(mic["volume"] - 10 ** (4.5 / 20)) < 1e-9 and rep["mic_gain_db"] == 4.5 and not rep["mic_gain_measured"]
+    cats = {ix[e][0] for e in mic["extra_material_refs"]}
+    assert {"audio_effects", "realtime_denoises"} <= cats
+    assert ix[next(e for e in mic["extra_material_refs"] if ix[e][0] == "audio_effects")][1]["name"] == "Voice Crisper"
+    assert next(t for t in d["tracks"] if mic in t["segments"])["type"] == "audio"
+    # F over the mic part: full-screen camera compound + one Adjustment block exactly over it
+    f = outer_by_compound(d, comp["cam_full"][0])
+    assert (f["target_timerange"]["start"], common.seg_end(f)) == (0, vdur) and f["volume"] == 0.0
+    adj = [(s["target_timerange"]["start"], common.seg_end(s)) for t in d["tracks"] if t["type"] == "adjust"
+           for s in t["segments"]]
+    assert adj == [(0, vdur)]
+    # the circle only over the screencast part
+    circ = outer_by_compound(d, comp["circle"])
+    assert circ["target_timerange"]["start"] >= vdur
+    # no pre-render by default
+    sub = json.loads((proj / "subdraft" / comp["mic"] / "sub_draft_config.json").read_text(encoding="utf-8"))
+    assert sub["audio_path"] == "" and not list((proj / "Resources").rglob("*_audio.aac"))
+
+
+def test_assemble_with_voice_prerender_opt_in(dump, cache):
+    import assemble
+    proj, cp = dump({"screencasts": ["sc1.mp4"], "voice": ["voice.m4a"]}, [])
+    cfg = common.load_config(str(cp))
+    _mic_first(cfg)
+    assemble.run(cfg, dry=False, cache_root=cache, guard_seconds=0, prerender=True)
+    comp = json.loads(cp.read_text(encoding="utf-8"))["compounds"]
+    sub = json.loads((proj / "subdraft" / comp["mic"] / "sub_draft_config.json").read_text(encoding="utf-8"))
+    assert sub["audio_path"].endswith("_audio.aac") and Path(sub["audio_path"]).is_file()
+
+
+def _synth(path: Path, amp: float, video: bool):
+    """3 s of speech-like noise at amplitude amp; with video: a 320x180 mp4 with that audio, else an m4a."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    noise = f"anoisesrc=d=3:c=pink:a={amp}:seed=3,volume=1"
+    cmd = ["ffmpeg", "-v", "error", "-y"]
+    if video:
+        cmd += ["-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:d=3", "-f", "lavfi", "-i", noise,
+                "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)]
+    else:
+        cmd += ["-f", "lavfi", "-i", noise, "-c:a", "aac", str(path)]
+    import subprocess
+    subprocess.run(cmd, check=True)
+    return path
+
+
+def test_assemble_matches_mic_to_screencast_loudness(tmp_path, dump, cache):
+    """I2: mic and screencast recorded at different levels -> the mic compound volume makes them equal (±1 LU),
+    the dB is reported; measure_lufs agrees; --set-mic restores a broken volume through write_draft."""
+    import assemble
+    import effects
+    import measure_lufs
+    syn = tmp_path / "syn"
+    sc = _synth(syn / "sc1.mp4", 0.05, True)
+    vo = _synth(syn / "voice.m4a", 0.3, False)
+    sc_lu = effects.loudness(effects.pcm(sc))["I"]
+    vo_lu = effects.loudness(effects.pcm(vo))["I"]
+    assert vo_lu - sc_lu > 8      # really different levels
+    proj, cp = _dump_from(dump, tmp_path, {"screencasts": [sc], "voice": [vo]})
+    cfg = common.load_config(str(cp))
+    _mic_first(cfg)
+    rep = assemble.run(cfg, dry=False, cache_root=cache, guard_seconds=0)
+    assert rep["mic_gain_measured"] and abs(rep["mic_gain_db"] - (sc_lu - vo_lu)) <= 0.5
+    comp = json.loads(cp.read_text(encoding="utf-8"))["compounds"]
+    d = common.read_draft(cfg)
+    assert abs(outer_by_compound(d, comp["mic"])["volume"] - 10 ** (rep["mic_gain_db"] / 20)) < 1e-6
+    res = measure_lufs.run(cfg, log=lambda *a: None)
+    assert res["ok"] and abs(res["mic_gain_db_to_match"]) <= 1.0
+    # break it, then --set-mic fixes it
+    outer_by_compound(d, comp["mic"])["volume"] = 1.0
+    common.write_draft(cfg, d, "test", dry=False, guard_seconds=0)
+    assert not measure_lufs.run(cfg, log=lambda *a: None)["ok"]
+    g = measure_lufs.set_mic(cfg, dry=False, guard_seconds=0, log=lambda *a: None)
+    assert g["measured"] and measure_lufs.run(cfg, log=lambda *a: None)["ok"]
+    root = json.loads((proj / "draft_content.json").read_text(encoding="utf-8"))
+    assert root == common.read_draft(cfg)
+
+
+def _dump_from(dump, tmp_path, files: dict):
+    """dump() with arbitrary source files (the fixture copies from MEDIA: point it at a temporary media dir)."""
+    import shutil as sh
+    media = tmp_path / "media"
+    media.mkdir()
+    names = {}
+    for sub, paths in files.items():
+        names[sub] = []
+        for p in paths:
+            sh.copy(p, media / p.name)
+            names[sub].append(p.name)
+    global MEDIA
+    old = MEDIA
+    MEDIA = media
+    try:
+        return dump(names, [])
+    finally:
+        MEDIA = old

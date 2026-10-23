@@ -2,12 +2,13 @@
 segment, plus the subdraft/<id>/ folder and the draft_meta_info.json entry (type 18) — the structure CapCut
 makes itself (skeletons in assets/templates/compound.json, harvested by harvest_templates.py).
 
-    python -X utf8 scripts/stage2/make_compound.py --config config.json --role screencast|voice [--dry]
+    python -X utf8 scripts/stage2/make_compound.py --config config.json --role screencast|voice [--dry] [--prerender]
 
 The CLI wraps all segments of one source role (screencast or voice) on their track; camera compounds (circle,
 full-screen per stretch) only via assemble.py, which uses wrap()/write_files().
-Audio compounds: CapCut plays a pre-render Resources/combination/<combination_id>_audio.aac; prerender_audio()
-makes it with ffmpeg, else audio_path stays "" and CapCut renders it itself (capcut-format.md).
+Audio compounds: CapCut plays a pre-render Resources/combination/<combination_id>_audio.aac. Default: audio_path ""
+and CapCut renders it itself; prerender_audio() (--prerender, opt-in) makes it with ffmpeg but ignores volume
+keyframes and fades, so it can differ from CapCut's own (capcut-format.md).
 """
 from __future__ import annotations
 
@@ -399,6 +400,7 @@ def main(argv=None):
     ap.add_argument("--role", required=True, choices=sorted(ROLE_KIND) + ["camera"])
     ap.add_argument("--name")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--prerender", action="store_true", help="audio: ffmpeg pre-render (default: CapCut renders it)")
     a = ap.parse_args(argv)
     if a.role == "camera":
         raise SystemExit("camera is not wrapped here: circle -> 1 compound and full-screen camera -> 1 per stretch "
@@ -425,7 +427,7 @@ def main(argv=None):
         print("dry run, not written")
         return
     common.write_draft(cfg, d, f"compound-{a.role}", dry=False, subdrafts={c.nid: c.wrapper})
-    if kind == "audio":
+    if kind == "audio" and a.prerender:
         prerender_audio(cfg.project_dir, c)
     write_files(cfg, [c])
     key = {"screencast": "screencast", "voice": "mic"}.get(a.role)
