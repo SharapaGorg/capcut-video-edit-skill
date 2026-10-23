@@ -2,8 +2,9 @@
 
     python -X utf8 scripts/stage9/apply_music.py --config config.json [--files a.mp3 b.mp3] [--tracks N] [--dry]
 
-Tracks: cfg.music_dir (prepare.music_files; unset -> stop and ask). N tracks (default: all files, at most one per
-chapter) take contiguous groups of chapters, balanced by duration; a track changes ONLY at a chapter boundary, with
+Tracks: cfg.music_dir (prepare.music_files; unset -> stop and ask). Default: the first file only (a music folder is
+often a library); --files NAME … picks tracks, --tracks N the first N; the chosen files are printed. N tracks (at most
+one per chapter) take contiguous groups of chapters, balanced by duration; a track changes ONLY at a chapter boundary, with
 a 2-s crossfade. Each track plays from its start, then loops its bar-aligned loop (beats.loop_region); loop seams
 overlap 60 ms (no click).
 Levels (references/stages/STAGE_9.md), relative to the voice (median short-term LUFS of the speech windows of each
@@ -16,7 +17,8 @@ same source time, new volume) starts 150 ms earlier with a 300-ms fade-in -> a l
 (references/capcut-format.md, «Громкость»). Level changes closer than 300 ms to a loop seam move to the seam.
 Every piece: material audios (one per file), Deep (effects.make('deep_effect'); not in the CapCut cache ->
 EffectCacheMissing, nothing written), audio_fades. Existing music tracks are removed first (their materials too).
-Writes both drafts (common.write_draft) and <work_dir>/stage9/music.json.
+Writes both drafts (common.write_draft) and <work_dir>/stage9/music.json (--dry: music.dry.json; music.json — the
+record check_mix / music_gain rely on — is left alone).
 """
 from __future__ import annotations
 
@@ -45,6 +47,28 @@ MIN_GAP = 2.0
 MIN_PIECE = 0.6
 MAX_VOLUME = 10.0        # CapCut: +20 dB
 TRACK = "Музыка"
+DEFAULT_TRACKS = 1       # without --files / --tracks: the first file of music_dir only (a library folder holds many)
+
+
+def record_path(cfg, dry: bool = False) -> Path:
+    """stage9/music.json = the music applied to the draft; a --dry plan goes to music.dry.json."""
+    return cfg.work_dir / "stage9" / ("music.dry.json" if dry else "music.json")
+
+
+def read_record(cfg, d: dict) -> dict:
+    """music.json if it describes the music in the draft (applied, its segment ids present), else SystemExit."""
+    p = record_path(cfg)
+    if not p.is_file():
+        raise SystemExit(f"нет {p}: сначала apply_music.py без --dry")
+    M = json.loads(p.read_text(encoding="utf-8"))
+    if not M.get("applied"):
+        raise SystemExit(f"{p.name}: applied = false (план --dry) — сначала apply_music.py без --dry")
+    ids = {s["id"] for t in d["tracks"] if is_music_track(t) for s in t["segments"]}
+    rec = {x.get("segment_id") for x in M.get("pieces", [])}
+    if not rec or rec != ids:
+        raise SystemExit(f"{p.name} не совпадает с музыкой в проекте ({len(rec & ids)} из {len(rec)} сегментов на месте, "
+                         f"в проекте {len(ids)}) — проект менялся после apply_music: запустите apply_music.py снова")
+    return M
 
 
 def is_music_track(t: dict) -> bool:
@@ -293,7 +317,9 @@ def run(cfg, names=None, n_tracks: int | None = None, dry: bool = False, cache_r
         log=print) -> dict:
     d = common.read_draft(cfg)
     files = prepare.music_files(cfg, names)
-    keys = [f.name for f in files][: n_tracks or len(files)]
+    keys = [f.name for f in files][: n_tracks or (len(files) if names else DEFAULT_TRACKS)]
+    log(f"tracks ({len(keys)} of {len(files)} in {'--files' if names else 'music_dir'}): {', '.join(keys)}"
+        + ("" if names or n_tracks or len(files) <= len(keys) else " — other tracks: --files NAME … or --tracks N"))
     tracks, vl, ch, words = prepare.run(cfg, d, keys, log)
     pl = plan(tracks, vl, ch, words, d["duration"] / 1e6, keys)
     report(pl, tracks, vl, log)
@@ -312,10 +338,10 @@ def run(cfg, names=None, n_tracks: int | None = None, dry: bool = False, cache_r
            "voice_levels": vl, "tracks": {k: {kk: vv for kk, vv in tracks[k].items() if kk not in ("key", "bar_starts")}
                                           for k in keys},
            **{k: pl[k] for k in ("regions", "gaps", "levels", "pieces", "warnings")}}
-    p = cfg.work_dir / "stage9" / "music.json"
+    p = record_path(cfg, dry)
     p.parent.mkdir(parents=True, exist_ok=True)
     if dry:
-        log("dry run, project not written")
+        log(f"dry run, project not written; plan -> {p.name} (music.json = what is in the draft, untouched)")
     else:
         out["backup"] = str(common.write_draft(cfg, d, "stage9-music", dry=False, guard_seconds=guard_seconds))
     p.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")

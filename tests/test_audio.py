@@ -149,6 +149,56 @@ def test_music_needs_music_dir_and_deep_cache(make_project, tmp_path, cache):
     assert snapshot(cfg) == before
 
 
+def test_dry_plan_is_not_the_record(make_project, tmp_path, cache):
+    """--dry writes music.dry.json; check_mix / music_gain refuse a record that is not the music in the draft."""
+    import apply_music
+    import check_mix
+    import music_gain
+    cfg = music_project(make_project, tmp_path)
+    quiet = lambda *a: None  # noqa: E731
+    apply_music.run(cfg, dry=True, cache_root=cache, log=quiet)
+    st = cfg.work_dir / "stage9"
+    assert (st / "music.dry.json").is_file() and not (st / "music.json").exists()
+    for f in (lambda: check_mix.run(cfg, log=quiet), lambda: music_gain.run(cfg, 3.0, guard_seconds=0, log=quiet)):
+        with pytest.raises(SystemExit, match="без --dry"):
+            f()
+    apply_music.run(cfg, dry=False, cache_root=cache, guard_seconds=0, log=quiet)
+    rec = (st / "music.json").read_text(encoding="utf-8")
+    # a later --dry leaves the record alone
+    apply_music.run(cfg, dry=True, cache_root=cache, log=quiet)
+    assert (st / "music.json").read_text(encoding="utf-8") == rec
+    # applied: false -> refused
+    (st / "music.json").write_text(json.dumps({**json.loads(rec), "applied": False}), encoding="utf-8")
+    for f in (lambda: check_mix.run(cfg, log=quiet), lambda: music_gain.run(cfg, 3.0, guard_seconds=0, log=quiet)):
+        with pytest.raises(SystemExit, match="applied = false"):
+            f()
+    # the draft no longer holds the recorded segments -> refused, draft untouched
+    (st / "music.json").write_text(rec, encoding="utf-8")
+    d = common.read_draft(cfg)
+    d["tracks"] = [t for t in d["tracks"] if not apply_music.is_music_track(t)]
+    common.write_draft(cfg, d, "test", dry=False, guard_seconds=0)
+    before = snapshot(cfg)
+    for f in (lambda: check_mix.run(cfg, log=quiet), lambda: music_gain.run(cfg, 3.0, guard_seconds=0, log=quiet)):
+        with pytest.raises(SystemExit, match="не совпадает"):
+            f()
+    assert snapshot(cfg) == before
+
+
+def test_default_one_track_of_a_library(make_project, tmp_path, cache):
+    """A folder with several tracks: default = the first one only (printed); --tracks N / --files choose more."""
+    import apply_music
+    cfg = music_project(make_project, tmp_path)
+    music_track(Path(cfg.music_dir) / "zz_second.wav", seconds=20.0, bpm=100)
+    logs = []
+    res = apply_music.run(cfg, dry=True, cache_root=cache, log=lambda *a: logs.append(" ".join(map(str, a))))
+    assert {p["track_key"] for p in res["pieces"]} == {"track.wav"}
+    assert any("track.wav" in x and "1 of 2" in x and "--files" in x for x in logs), logs
+    res = apply_music.run(cfg, n_tracks=2, dry=True, cache_root=cache, log=lambda *a: None)
+    assert [r["track"] for r in res["regions"]] == ["track.wav", "zz_second.wav"]
+    res = apply_music.run(cfg, names=["zz_second.wav"], dry=True, cache_root=cache, log=lambda *a: None)
+    assert {p["track_key"] for p in res["pieces"]} == {"zz_second.wav"}
+
+
 def test_music_plan_short_video_and_no_chapters(make_project, tmp_path, cache):
     """Video shorter than the track: no loop seam; no chapters file -> one region."""
     import apply_music
@@ -305,17 +355,18 @@ def test_srt_description_cases(make_project, tmp_path):
 
 
 def test_loudnorm_srt_sync_rms(make_project, tmp_path):
-    """Tone bursts where the srt lines start: --no-whisper -> speech onset by RMS, all within ±0.3 s."""
+    """Continuous speech-like bursts (0.15-s breaths, never a 1.5-s silence) with srt lines on phrase starts:
+    --no-whisper -> the RMS onset is the rising edge at the line, not the previous phrase still sounding."""
     import loudnorm
     cfg = music_project(make_project, tmp_path, music=False)
     tt = cfg.work_dir / "stage3" / "transcript_timeline.json"
     tt.write_text(json.dumps({**json.loads(tt.read_text(encoding="utf-8")), "duration": 12.0}), encoding="utf-8")
     t = np.arange(12 * SR) / SR
     a = np.zeros(len(t), np.float32)
-    starts = [1.0, 5.0, 9.0]
+    starts = [1.0, 3.65, 6.3, 8.95]
     for s in starts:
         m = (t >= s) & (t < s + 2.5)
-        a[m] = 0.2 * np.sin(2 * np.pi * 300 * t[m])
+        a[m] = 0.2 * np.sin(2 * np.pi * 300 * t[m]) * (0.7 + 0.3 * np.sin(2 * np.pi * 5 * t[m]))
     aud = wav(tmp_path / "a.wav", a)
     src = tmp_path / "talk.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=30:duration=12",
@@ -327,5 +378,21 @@ def test_loudnorm_srt_sync_rms(make_project, tmp_path):
                              for i, s in enumerate(starts)), encoding="utf-8")
     code, rep, final = loudnorm.run(src, cfg, no_whisper=True, log=lambda *a: None)
     txt = rep.read_text(encoding="utf-8")
-    assert "совпало: 3 из 3" in txt and "RMS" in txt, txt
+    assert "совпало: 4 из 4" in txt and "RMS" in txt, txt
     assert code == 0, txt
+
+
+def test_srt_empty_transcript_and_bom_description(make_project, tmp_path):
+    import build_srt
+    cfg = music_project(make_project, tmp_path, music=False)
+    tt = cfg.work_dir / "stage3" / "transcript_timeline.json"
+    srt_words(tt)
+    desc = tmp_path / "bom.md"
+    bom = b"\xef\xbb\xbf"
+    desc.write_bytes(bom + "00:00 Старое\n00:30 Старое 2\n\nТекст\n".encode("utf-8"))
+    cfg.description_md = str(desc)
+    assert build_srt.run(cfg, log=lambda *a: None)["description"] == "replaced"
+    assert desc.read_bytes() == bom + "00:00 Вступление\n00:20 Середина\n00:40 Итог\n\nТекст\n".encode("utf-8")
+    tt.write_text(json.dumps({"duration": 10.0, "segments": []}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="нет слов"):
+        build_srt.run(cfg, log=lambda *a: None)

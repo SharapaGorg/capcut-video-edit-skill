@@ -10,7 +10,7 @@
    an almost flat, non-black frame (std < 2 % of full scale) -> possible missing-media placeholder. Both fail
    (look at the png).
 4. 5 random srt lines (<work_dir>/stage10/subtitles.srt) vs the sound ±0.3 s: faster-whisper (base) — missing or
-   --no-whisper -> speech onset by RMS. The export length vs the timeline (transcript_timeline duration) > 0.5 s ->
+   --no-whisper -> speech onset by RMS (the first rising edge from start − 0.3 s, not the first loud window). The export length vs the timeline (transcript_timeline duration) > 0.5 s ->
    fail (rebuild the srt with a shift).
 Report: <work_dir>/stage10/export_report.md; exit 0 (all OK) / 1. The CapCut project is not touched.
 """
@@ -138,16 +138,19 @@ def _words(s: str) -> list[str]:
     return re.findall(r"\w+", s.lower().replace("ё", "е"))
 
 
-def onset_rms(x: np.ndarray, sr: int, win: float = 0.02) -> float | None:
-    """Speech onset: the first two 20-ms windows above max(noise floor + 12 dB, −60 dBFS)."""
+def onset_rms(x: np.ndarray, sr: int, t_from: float = 0.0, win: float = 0.02) -> float | None:
+    """Speech onset at or after t_from (s into x): the first RISING edge — a 20-ms window at or below the threshold
+    followed by two above it — so speech that is still going on at t_from (the previous phrase) is not taken for the
+    onset. Threshold = max(min(noise floor (5th pct) + 12 dB, peak − 15 dB), −60 dBFS). None = no edge."""
     n = int(sr * win)
     if len(x) < 3 * n:
         return None
     r = np.sqrt(np.mean(x[: len(x) // n * n].reshape(-1, n) ** 2, axis=1))
     db = 20 * np.log10(np.maximum(r, 1e-6))
-    thr = max(np.sort(db)[len(db) // 10] + 12, -60)
-    hit = np.nonzero((db[:-1] > thr) & (db[1:] > thr))[0]
-    return float(hit[0] * win) if len(hit) else None
+    thr = max(min(np.percentile(db, 5) + 12, db.max() - 15), -60)
+    i0 = max(1, int(t_from / win))
+    hit = [i for i in range(i0, len(db) - 1) if db[i - 1] <= thr < db[i] and db[i + 1] > thr]
+    return float(hit[0] * win) if hit else None
 
 
 def srt_sync(path: Path, blocks: list[dict], n: int, use_whisper: bool, log, seed: int = 10) -> tuple[list[dict], str]:
@@ -181,7 +184,7 @@ def srt_sync(path: Path, blocks: list[dict], n: int, use_whisper: bool, log, see
             elif ws:
                 found, method = st + ws[0].start, "whisper (первое слово)"
         if found is None:
-            on = onset_rms(x, 16000)
+            on = onset_rms(x, 16000, t_from=b["start"] - st - SYNC_TOL - 0.05)
             found = st + on if on is not None else None
             method = "rms"
         delta = None if found is None else found - b["start"]

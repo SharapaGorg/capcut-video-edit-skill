@@ -32,6 +32,7 @@ MIN_DUR = 1.0
 GAP_BREAK = 0.7
 PAD = 0.25
 MIN_GAP = 0.04
+BOM = b"\xef\xbb\xbf"
 TC_RE = re.compile(r"^\s*(\d{1,2}:)?\d{1,2}:\d{2}\s+\S")
 
 
@@ -43,6 +44,8 @@ def load_words(cfg) -> tuple[list[dict], float | None]:
     d = json.loads(p.read_text(encoding="utf-8"))
     words = [{"t": w["word"].strip(), "s": w["start"], "e": w["end"], "hook": bool(w.get("hook") or w.get("duplicate"))}
              for seg in d["segments"] for w in seg["words"] if w["word"].strip()]
+    if not words:
+        raise SystemExit(f"{p}: нет слов — субтитры строить не из чего (этап 0 / этап 3)")
     return sorted(words, key=lambda w: w["s"]), d.get("duration")
 
 
@@ -227,7 +230,9 @@ def update_description(cfg, lines: list[str], dry: bool) -> tuple[str, str]:
     p = Path(cfg.description_md) if cfg.description_md else None
     if p is None or not p.is_file():
         return "missing", "description.md не найден, не генерирую"
-    raw = p.read_bytes().decode("utf-8")
+    data = p.read_bytes()
+    bom = data.startswith(BOM)   # Notepad's UTF-8 BOM: strip before matching the timecode lines, keep on write
+    raw = data[3:].decode("utf-8") if bom else data.decode("utf-8")
     nl = "\r\n" if "\r\n" in raw else "\n"
     rows = raw.split(nl)
     runs, i = [], 0
@@ -253,7 +258,7 @@ def update_description(cfg, lines: list[str], dry: bool) -> tuple[str, str]:
         bk = cfg.work_dir / "backups" / f"description-before-{time.strftime('%Y%m%d-%H%M%S')}.md"
         bk.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(p, bk)
-        p.write_bytes(new.encode("utf-8"))
+        p.write_bytes((BOM if bom else b"") + new.encode("utf-8"))
     return status, msg
 
 

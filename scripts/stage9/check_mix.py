@@ -5,7 +5,9 @@ voice, measure ebur128 short-term (3 s) every 100 ms.
 
 Checks (STAGE_9.md «Проверка»):
 - under speech the music is 13 ±2 LU below the voice: median of (voice S − music S) over 3-s speech windows that lie
-  inside a speech level piece of stage9/music.json, per track region; the share of windows within ±2 LU is reported;
+  inside a speech level piece of stage9/music.json, per track region. The share of windows within 13 ±2 LU is
+  reported, NOT gated: the voice itself swings ±5 LU between 3-s windows (live 32-min mix: p5–p95 of voice − music
+  8–23 LU, only 41 % of windows within ±2 even of its own median), so a per-window gate would fail a correct mix;
 - last 20 s: 10 ±2 LU (speech windows there, if any);
 - the end fades out: RMS of the last 250 ms >= 20 dB below the level before the fade;
 - loop seams: from loop_end (or a bar start) to loop_start ±2 ms, no click (max sample step at the seam <= 3x the
@@ -70,11 +72,13 @@ def _rms_db(x) -> float:
     return float(20 * np.log10(np.sqrt(np.mean(np.square(x))) + 1e-9)) if len(x) else -180.0
 
 
-def _stats(dd) -> dict:
+def _stats(dd, target: float) -> dict:
+    """median / p5 / p95 of voice − music (LU) and the share of windows within target ±TOL."""
     if not len(dd):
         return {"n": 0}
     return {"n": int(len(dd)), "median": round(float(np.median(dd)), 2), "p5": round(float(np.percentile(dd, 5)), 2),
-            "p95": round(float(np.percentile(dd, 95)), 2), "share_within_2": round(float((np.abs(dd - np.median(dd)) <= TOL).mean()), 3)}
+            "p95": round(float(np.percentile(dd, 95)), 2), "target": target,
+            "share_within_2": round(float((np.abs(dd - target) <= TOL).mean()), 3)}
 
 
 def seams(M: dict, music: np.ndarray, sr: int = SR) -> list[dict]:
@@ -102,10 +106,7 @@ def seams(M: dict, music: np.ndarray, sr: int = SR) -> list[dict]:
 
 def run(cfg, log=print) -> dict:
     d = common.read_draft(cfg)
-    mp = cfg.work_dir / "stage9" / "music.json"
-    if not mp.is_file():
-        raise SystemExit(f"нет {mp}: сначала apply_music.py")
-    M = json.loads(mp.read_text(encoding="utf-8"))
+    M = apply_music.read_record(cfg, d)
     dur = d["duration"] / 1e6
     voice = build_voice.build(cfg, d, log)
     music = render_music(d)
@@ -126,14 +127,14 @@ def run(cfg, log=print) -> dict:
     fails, rep = [], {"music_I": effects.loudness(music)["I"], "regions": []}
     under = sp & inside("speech")
     for r in M["regions"]:
-        st = _stats((Sv - Sm)[under & (T > r["start"]) & (T <= r["end"])])
+        st = _stats((Sv - Sm)[under & (T > r["start"]) & (T <= r["end"])], -M["under_speech_lu"])
         rep["regions"].append({"track": r["track"], "t": [r["start"], r["end"]], **st})
         if st["n"] and abs(st["median"] + M["under_speech_lu"]) > TOL:
             fails.append(f"{r['track']}: голос − музыка {st['median']} LU (норма {-M['under_speech_lu']:g} ±{TOL:g})")
-    rep["under_speech"] = _stats((Sv - Sm)[under])
+    rep["under_speech"] = _stats((Sv - Sm)[under], -M["under_speech_lu"])
     if not rep["under_speech"]["n"]:
         fails.append("нет окон речи для замера")
-    end = _stats((Sv - Sm)[sp & inside("ending")])
+    end = _stats((Sv - Sm)[sp & inside("ending")], -M["ending_rel_lu"])
     rep["ending"] = end
     if end["n"] and abs(end["median"] + M["ending_rel_lu"]) > TOL:
         fails.append(f"концовка: голос − музыка {end['median']} LU (норма {-M['ending_rel_lu']:g} ±{TOL:g})")
@@ -162,7 +163,7 @@ def run(cfg, log=print) -> dict:
     (out / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     us_ = rep["under_speech"]
     log(f"under speech: voice − music median {us_.get('median')} LU (p5 {us_.get('p5')}, p95 {us_.get('p95')}, "
-        f"{us_.get('share_within_2')} of windows within ±2), ending {end.get('median')} LU, "
+        f"{us_.get('share_within_2')} of windows within the {-M['under_speech_lu']:g} ±{TOL:g} LU target — reported, not gated), ending {end.get('median')} LU, "
         f"fade {env['before_fade']:.1f} → {env['last_250ms']:.1f} dB, seams {len(rep['seams'])}")
     log("VALIDATION:", "OK" if not fails else "FAIL")
     for f in fails:

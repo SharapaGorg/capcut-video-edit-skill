@@ -3,7 +3,8 @@
     python -X utf8 scripts/stage9/music_gain.py --config config.json 3 [--dry]      (negative N = quieter)
 
 Keeps the relative levels (under speech / pauses / ending) and the fades. CapCut volume is capped at +20 dB (10.0).
-Updates <work_dir>/stage9/music.json (volume, gain_db, gain_offset_db) when present. Writes both drafts.
+Needs stage9/music.json describing the music in the draft (apply_music.read_record: applied, same segment ids) —
+else stops. Updates it (volume, gain_db, gain_offset_db). Writes both drafts.
 """
 from __future__ import annotations
 
@@ -21,9 +22,8 @@ import apply_music  # noqa: E402
 def run(cfg, db: float, dry: bool = False, guard_seconds: float = 5, log=print) -> int:
     k = 10 ** (db / 20)
     d = common.read_draft(cfg)
+    M = apply_music.read_record(cfg, d)    # also: no music tracks -> the record does not match -> stop
     segs = [s for t in d["tracks"] if apply_music.is_music_track(t) for s in t["segments"]]
-    if not segs:
-        raise SystemExit("нет дорожек «Музыка» — сначала apply_music.py")
     capped = 0
     for s in segs:
         v = s["volume"] * k
@@ -35,16 +35,12 @@ def run(cfg, db: float, dry: bool = False, guard_seconds: float = 5, log=print) 
         log("dry run, not written")
         return len(segs)
     common.write_draft(cfg, d, "stage9-music-gain", dry=False, guard_seconds=guard_seconds)
-    mp = cfg.work_dir / "stage9" / "music.json"
-    if mp.is_file():
-        M = json.loads(mp.read_text(encoding="utf-8"))
-        vol = {s["id"]: s["volume"] for s in segs}
-        for p in M.get("pieces", []):
-            if p.get("segment_id") in vol:
-                p["volume"] = vol[p["segment_id"]]
-                p["gain_db"] = round(p["gain_db"] + db, 2)
-        M["gain_offset_db"] = round(M.get("gain_offset_db", 0.0) + db, 2)
-        mp.write_text(json.dumps(M, ensure_ascii=False, indent=1), encoding="utf-8")
+    vol = {s["id"]: s["volume"] for s in segs}
+    for p in M["pieces"]:
+        p["volume"] = vol[p["segment_id"]]
+        p["gain_db"] = round(p["gain_db"] + db, 2)
+    M["gain_offset_db"] = round(M.get("gain_offset_db", 0.0) + db, 2)
+    apply_music.record_path(cfg).write_text(json.dumps(M, ensure_ascii=False, indent=1), encoding="utf-8")
     return len(segs)
 
 
