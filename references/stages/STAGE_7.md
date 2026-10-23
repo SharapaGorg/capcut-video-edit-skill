@@ -43,6 +43,19 @@
 - Таблица → `graphics/items.json` (формат — graphics.md). Файлы: `graphics/html/<id>.html`, `graphics/comps.json`, `graphics/out/<id>.mov`, `graphics/render_meta.json`, `graphics/graphics_applied.json`.
 - SFX под входы — `apply_sfx.py` (голос −12 LU).
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | агент: таблица предложения → **Стоп** | `stage3/transcript_timeline.json`, `layout/layout.json`, `stage6/zooms.json` | `graphics/items.json` (формат — graphics.md) |
+| 2 | `graphics/gfx_build.py [--spec graphics/items.json]` | `items.json`, `layout.json`, `zooms.json` | `graphics/html/<id>.html`, `graphics/comps.json` |
+| 3 | `graphics/render.py [--only ID …]` (в фоне) | `comps.json`, HTML | `graphics/out/<id>.mov`, `graphics/render_meta.json` |
+| 4 | `graphics/preview.py --id ID [--t SEC …]` | `comps.json`, `stage3/timeline_map.json`, `layout.json` | `graphics/preview/<id>_<t>.png` |
+| 5 | `graphics/apply_graphics.py [--only ID …] [--replace] --dry`, затем без `--dry` | `comps.json`, `render_meta.json`, MOV | дорожка «Графика», `graphics/graphics_applied.json`; сплит сдвигает камеру |
+| 6 | `graphics/apply_sfx.py [--only ID …] [--sfx FILE] --dry`, затем без `--dry` | `comps.json` (sfx), `graphics_applied.json`, `sfx_dir` | SFX под входы |
+| — | первая тестовая — шаги 2–5 с `--only ID` → **ок пользователя** → остальные | | |
+
 ## Проверка
 - VALIDATION.md.
 - Каждая есть в таблице, таймкоды совпадают.

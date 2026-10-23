@@ -55,6 +55,18 @@
 
 ---
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| A2 | в составе этапа 2 §7: `stage2/assemble.py`; починка `layout/fix_circle.py`, баланс белого `layout/wb_fix.py` | проект | кружок |
+| B1 | `layout/candidates.py` | `stage3/transcript_timeline.json`, проект, кадры `stage2/frames/`, `layout/layout.json` | `layout/layout_candidates.json`, `layout_proposal.md`, `f_ranges_proposed.json` |
+| B3 | **Стоп** (решить самому) | `layout_proposal.md` | утверждённые диапазоны: `layout/f_ranges_proposed.json` (или правленая копия) |
+| B4 | `layout/apply_layout.py --ranges layout/f_ranges_proposed.json --dry`, затем без `--dry` | диапазоны F, проект | дорожка «Камера F», `layout/layout.json` |
+| B4 | `layout/make_compound_f.py --dry`, затем без `--dry` | проект | compound на участок F + Adjustment; `config.json` → compounds.cam_full |
+| B5 | `stage3/build_maps.py` (STAGE_3 шаги 1–4) | проект | карты этапа 3 |
+
 ## Проверка
 - validation.md.
 - Вставка: синхрон с голосом в 3 точках, сдвиг ≤ 1 кадр.

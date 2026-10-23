@@ -17,6 +17,14 @@
 - Кадры брать из исходников через timeline_map.json, не из экспорта.
 - Структурная правка → шаги 1–4 заново.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage3/build_maps.py [--raw DIR] [--expect SEC] [--no-audio-check]` (шаги 1–4) | проект, `transcript/transcript.json`, сырой драфт `backups/stage1-before-*` (или `--raw`), `stage1/chapters.json`, логи резки, `layout/assembly.json` | `stage3/timeline_map.json`, `transcript_timeline.{json,txt}`, `chapters_timeline.json`, `report.md` |
+| 2 | правки по черновику: `stage3/ripple_cut.py --cuts cuts.json --dry`, затем без `--dry` | `cuts.json` `[{start, end}]` с таймлайна | оба драфта, `stage3/ripple_cuts.json`, `layout/layout.json` сдвинут, карты заново (build_maps сам) |
+
 ## Проверка
 - VALIDATION.md.
 - Каждое слово transcript_timeline попадает в сегмент голоса.

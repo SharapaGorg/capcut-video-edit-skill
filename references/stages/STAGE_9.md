@@ -25,6 +25,17 @@
 ## Применение
 - Отдельная аудиодорожка. Ключевые кадры громкости по таблице уровней.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage9/prepare.py [--files a.mp3 …]` (сам строит голос: `stage9/build_voice.py`) | `music_dir`, проект, `stage3/transcript_timeline.json`, `chapters_timeline.json` | `stage9/work/loops.json`, `voice_levels.json`, `voice_timeline.f32` |
+| 2 | `stage9/apply_music.py [--files …] [--tracks N] --dry`, затем без `--dry` | `music_dir`, `stage9/work/*`, `deep_effect` | дорожки «Музыка…», `stage9/music.json` |
+| 3 | `stage9/check_mix.py` | проект, `stage9/music.json` | проверка уровней (exit 1) |
+| 4 | по просмотру: `stage9/music_gain.py N [--dry]` | `stage9/music.json` | вся музыка ±N dB, `music.json` |
+| — | `stage9/measure_lufs.py [--set-mic]` — микрофон vs скринкаст | проект | `stage9/work/lufs.json` |
+
 ## Проверка
 - VALIDATION.md.
 - В местах речи музыка тише голоса на 13 ±2 LU (измерить по окнам 3 с).

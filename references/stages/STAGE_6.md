@@ -41,6 +41,17 @@
 - Клон шаблона, меняются только значения ключевых кадров.
 - zooms.json: все зумы с таймкодами — нужен этапам 7–8.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | агент: фразы с названным элементом / ключевые мысли по `stage3/transcript_timeline.json` | — | `stage6/candidates.json` `[{n, t, words, note}]` |
+| 2 | `stage6/find_focus.py [--cands stage6/candidates.json] [n …]` | `candidates.json`, проект, `layout/layout.json` | `stage6/focus_ocr.json`, `stage6/frames/`, `stage6/ocr/` |
+| 3 | **Стоп** → таблица `zoom_proposal.md` | `focus_ocr.json` | `stage6/zooms_spec.json` `{focus: [{n, start, end, center, scale, phrase, what, conf, words}], pushin: [{n, t, phrase}], punchin: [{n, t}], sfx?: [...]}` |
+| 4 | `stage6/apply_zooms.py [--spec stage6/zooms_spec.json] --dry`, затем без `--dry` | `zooms_spec.json`, `layout/layout.json`, `sfx_dir`, проект | оба драфта (+ subdraft), дорожка SFX, `stage6/zooms.json` |
+| 5 | `stage6/check_zooms.py [--no-frames]` | `stage6/zooms.json`, проект | `stage6/check/NN.png`, `report.json` (exit 1 при проблеме) |
+
 ## Проверка
 - VALIDATION.md.
 - Только утверждённые зумы.

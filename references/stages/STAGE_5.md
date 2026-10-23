@@ -18,6 +18,19 @@
    - Кодировать только файлы с находками, в фоне.
    - Подменить путь материала в проекте. Сегменты не трогать.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage5/extract_frames.py [--only SUBSTR]` | проект (используемые куски скринкаста) | `stage5/frames/<stem>/<сек>.jpg`, `stage5/segment_starts.json` |
+| 2 | `stage5/run_ocr.py [--jobs 8]` (в фоне) | `stage5/frames/` | `stage5/ocr/*.tsv` |
+| 3 | `stage5/scan_patterns.py`; агент смотрит кадры `segment_starts.json` | `stage5/ocr/` | `stage5/pattern_hits.json`; `stage5/manual_findings.json` (визуальные находки, опц.) |
+| 4 | `stage5/build_findings.py` | `pattern_hits.json`, `manual_findings.json`, `segment_starts.json` | `stage5/censor_findings.json`, `censor_proposal.md` |
+| 5 | **Стоп** → `apply: true/false` в `censor_findings.json` | — | — |
+| 6 | `stage5/apply_censor.py --encode-only` (в фоне), затем `--dry`, затем без флагов | `censor_findings.json` (apply true), исходники | `stage5/censored/<stem>_censored.mp4`, пути в проекте и draft_meta_info, `stage5/censor_applied.json` |
+| 7 | `stage5/verify_censor.py` | `censor_applied.json`, копии и исходники | `stage5/verify/NN_{before,after}.png`, `report.json` (exit 1 при проблеме) |
+
 ## Проверка
 - VALIDATION.md.
 - Длительность и fps `_censored` = исходник. Иначе стоп.

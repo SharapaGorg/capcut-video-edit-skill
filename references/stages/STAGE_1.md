@@ -46,6 +46,16 @@
 - cuts_applied.json: что вырезано и сдвиг каждого оставшегося куска.
 - chapters.json: главы во времени транскрипта.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | агент: читает `transcript/transcript.txt` | — | `stage1/candidates_input.json` `[{hint_s, first, last, cat, why, conf}]`, `stage1/chapters_input.json` `[{n, title, start_transcript_s}]` |
+| 2 | `stage1/build_proposal.py` | эти два + `transcript/transcript.json` | `stage1/cuts_candidates.json`, `stage1/cuts_proposal.md`, `stage1/frames/` |
+| 3 | **Стоп** → ответ номерами | `cuts_proposal.md` | `stage1/approved_ids.json` `[id, …]` (нет файла → все «точно») |
+| 4 | `stage1/apply_cuts.py --dry`, затем без `--dry` | `cuts_candidates.json`, `approved_ids.json`, `chapters_input.json` | `stage1/cuts_approved.json`, `cuts_applied.json`, `chapters.json`; оба драфта; бэкап `backups/stage1-before-*` (сырой драфт для этапа 3) |
+
 ## Проверка
 - VALIDATION.md.
 - Вырезано только утверждённое, совпадение по таймкодам.

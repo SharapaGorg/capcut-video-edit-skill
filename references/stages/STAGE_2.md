@@ -72,3 +72,18 @@
 4. Adjustment: один блок на весь участок камеры во весь кадр (не резаный, растянутый по границам участка; на каждый такой участок). Свалка с уже стоящими блоками Adjustment → assemble.py отказывает (цвет дважды); удалить их и запустить снова.
 5. Кружок камеры: Temp −18, Saturation 10 прямо на compound-сегмент кружка (делает assemble.py; проверка/починка — `scripts/layout/fix_circle.py`).
 6. Проверка: на дорожках 3–5 сегментов; звук камеры 0; у голосовых сегментов есть audio_effects + realtime_denoises; Adjustment покрывает участок камеры целиком.
+
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage2/analyze.py` | `transcript/transcript.json`, `transcript/voice_16k.wav`, `stage1/cuts_applied.json`, `stage1/chapters.json`, проект | `stage2/candidates.json`, `stage2/stage2_review.md`, кадры `stage2/frames/` |
+| 2 | `stage2/verify.py` | `candidates.json` (verify=True), `voice_16k.wav` | обновлённые `candidates.json`, `stage2_review.md` |
+| 3 | **Стоп** по «под вопросом» | `stage2_review.md` | `stage2/approved_ids.json` `[id, …]` (утверждённые «под вопросом») |
+| 4 | `stage2/apply.py --dry`, затем без `--dry` | `candidates.json` (auto) + `approved_ids.json`, `stage1/cuts_applied.json`, `transcript.json` | `stage2/cuts2_applied.json`; оба драфта |
+| 5 (§7.0) | `layout/xcorr.py [--force]` (assemble вызывает сам, если пар нет) | `sources` camera/screencasts/voice | `layout/assembly.json` → pairs |
+| 6 (§7) | `stage2/assemble.py --dry`, затем `[--resync] [--allow-unsynced] [--prerender]` | проект-свалка, `layout/assembly.json`, `layout/layout.json` (F, если есть) | compounds, эффекты голоса, громкость микрофона (dB в выводе), Adjustment; `config.json` → compounds; `assembly.json` → assembled |
+| 7 | опционально: `layout/add_camera.py --camera FILE`, `layout/fix_circle.py [--center-x CX]`, `layout/wb_fix.py --file F --ranges r.json --temp N` | проект, `cfg.compounds.circle` | кружок дополнен/починен |
+| 8 | `stage9/measure_lufs.py [--set-mic]` | проект | `stage9/work/lufs.json`; микрофон = скринкаст ±1 LU |
+| — | `stage2/make_compound.py --role screencast\|voice [--prerender]` — только ручная обёртка одной роли (assemble делает сам) | проект | compound |

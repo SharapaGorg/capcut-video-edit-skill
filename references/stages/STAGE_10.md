@@ -14,9 +14,18 @@
 
 ## Порядок после экспорта
 - `scripts/stage10/loudnorm.py "<экспорт>.mp4"`: ffprobe → ebur128 → при выходе за норму двухпроходный loudnorm (видео copy, aac 320k) → `<имя>_final.mp4` → повторный замер → кадры раз в 10 с → 5 реплик srt через whisper ±0.3 с → `stage10/export_report.md`, код 0/1. Флаги `--dry`, `--no-whisper`.
-- Экспорт (делаю я): 1920×1080, 30 fps, H.264, битрейт ≥ 16 Мбит/с, AAC 48 кГц. Перед открытием проекта для экспорта — `Get-Process CapCut` = 0 после последней записи.
+- Экспорт (делаю я): разрешение и fps = проекту (`config.json` → fps/width/height), H.264, битрейт ≥ 16 Мбит/с, AAC 48 кГц. Перед открытием проекта для экспорта — `Get-Process CapCut` = 0 после последней записи.
 - На YouTube: `_final.mp4` (если создан, иначе исходный), srt — Subtitles → Upload file → With timing; длительность экспорта ≠ таймлайн > 0.5 с → пересобрать srt со сдвигом. Главы — в описание.
 - Превью и загрузка — не в скилле.
+
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage10/build_srt.py [--dry]` | `stage3/transcript_timeline.json`, `chapters_timeline.json`, `stage10/srt_fixes.json` (опц.), `description_md` | `stage10/subtitles.srt`, `stage10/chapters.txt`, блок таймкодов в описании (бэкап в `backups/`) |
+| 2 | экспорт в CapCut (пользователь) | проект | `<экспорт>.mp4` |
+| 3 | `stage10/loudnorm.py "<экспорт>.mp4" [--dry] [--no-whisper]` | экспорт, `subtitles.srt` | `<имя>_final.mp4` (если вне нормы), `stage10/export_frames/`, `stage10/export_report.md` (exit 1) |
 
 ## Проверка
 - ffprobe: разрешение и fps = проект; длительность аудио = видео ±1 кадр.

@@ -146,3 +146,15 @@ def test_local_overlap_checks_use_common():
         src = (SCRIPTS / f).read_text(encoding="utf-8")
         assert "overlap_errors" in src or "draft_overlaps" in src, f
         assert 'q["target_timerange"]["start"] + 1' not in src, f
+
+
+def test_every_stage_file_has_a_scripts_block_with_real_scripts():
+    """Every STAGE_*.md says which script runs each step (block «## Скрипты»), and those scripts exist."""
+    for p in sorted((ROOT / "references" / "stages").glob("STAGE_*.md")):
+        text = p.read_text(encoding="utf-8")
+        assert "## Скрипты" in text, p.name
+        block = text[text.index("## Скрипты"):]
+        named = set(re.findall(r"`((?:stage\d+|layout|graphics|shorts)/[a-z_0-9]+\.py)", block))
+        assert named, p.name
+        missing = [n for n in named if not (SCRIPTS / n).is_file()]
+        assert not missing, (p.name, missing)

@@ -147,11 +147,11 @@
 - `fix` — замены слов в субтитрах (слово без знаков препинания → замена). `cam_cx` — центр кропа камеры по x (px исходника): `{"<файл камеры>": x}` для кусков-стека или одно число на весь шортс; по умолчанию — медиана x лица (по кускам «камера во весь кадр», иначе по стеку).
 
 ### Рилсы (Instagram)
-- Та же спека, сборка с флагом: `python -X utf8 scripts/shorts/build.py <id> --reels`. Результат — `out/reels/<id>_<slug>.mp4`, копия `work/<id>/final_reels.mp4`.
+- Та же спека, сборка с флагом: `python -X utf8 scripts/shorts/build.py <id> --config config.json --reels`. Результат — `out/reels/<id>_<slug>.mp4`, копия `work/<id>/final_reels.mp4`.
 - Отличие от шортса — только концовка (4 с вместо 2.5): «Напиши «СЛОВО» в комментариях / и я пришлю тебе / полный урок». Кодовое слово — `"code_word"` в спеке, иначе `reels_word` в config.json; нет ни того, ни другого → ошибка (задать на каждый ролик).
 - `mute` — `[[tl_a, tl_b], …]`: тишина на интервале таймлайна без склейки (оговорка), слово выпадает из субтитров. Действует и для шортса, и для рилса.
 
 ### Тиктоки
-- `python -X utf8 scripts/shorts/build.py <id> --tiktok` → `out/tiktok/<id>_<slug>.mp4`, копия `work/<id>/final_tiktok.mp4`.
+- `python -X utf8 scripts/shorts/build.py <id> --config config.json --tiktok` → `out/tiktok/<id>_<slug>.mp4`, копия `work/<id>/final_tiktok.mp4`.
 - Блок `"tiktok": {"ranges": [...]}` в спеке — свои диапазоны (тизер: хук + одна мысль, речь ≤ 12.5 с).
 - Концовка 2.5 с: скрин превью с названием (`tiktok_thumbnail` в config.json, необязательно) + плашка «Полное видео на YouTube: <канал>» (`tiktok_channel` в config.json). Канал не задан → «ПОЛНОЕ ВИДЕО НА YOUTUBE» + «ИЩИ ПО НАЗВАНИЮ ↑» и предупреждение в выводе; имя канала не выдумывать.

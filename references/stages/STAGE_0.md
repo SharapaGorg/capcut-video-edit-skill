@@ -14,6 +14,14 @@
 - transcript.txt — фразы с таймкодами `[мм:сс.с–мм:сс.с] текст`.
 - transcript.srt.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | `stage0/transcribe.py [--dry]` (в фоне, лог) | проект: куски голоса (`voice/` + звук скринкаста по `sources`) | `transcript/voice_16k.wav`, `transcript/transcript.{json,txt,srt}`; проверки этапа (exit 1) |
+| — | доп. кусок: `stage0/transcribe.py --audio FILE --out-prefix NAME` | файл куска | `transcript/NAME.{json,txt,srt}` |
+
 ## Проверка
 - Последнее слово заканчивается в пределах 5 с от конца аудио (ffprobe).
 - Галлюцинации: «субтитр», «продолжение следует», «спасибо за просмотр», одинаковые сегменты подряд. Найдено → перезапуск с vad_filter=True.

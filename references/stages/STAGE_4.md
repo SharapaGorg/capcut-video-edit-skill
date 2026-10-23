@@ -27,6 +27,15 @@
 ## Выход
 - STAGE_3.md, шаги 1–4 заново.
 
+## Скрипты
+cwd = рабочая папка ролика (там `config.json`); запуск `python -X utf8 ~/.claude/skills/video-edit/scripts/<путь> --config config.json`; пишущие в проект — сначала `--dry`. По порядку:
+
+| № | Команда | Вход | Выход |
+|---|---|---|---|
+| 1 | агент: варианты по `stage3/transcript_timeline.txt` | — | `stage4/hook_proposal.md` |
+| 2 | **Стоп** → выбранный вариант | `hook_proposal.md` | `stage4/hook.json` `{"variant": "B", "pieces": [[a, b], …]}` — секунды текущего таймлайна, в порядке хука |
+| 3 | `stage4/apply_hook.py --hook stage4/hook.json --dry`, затем без `--dry` `[--no-maps]` | `hook.json`, `stage3/transcript_timeline.json`, проект | оба драфта, `stage4/hook_applied.json` (+ `ending`), `layout/layout.json` сдвинут; карты этапа 3 заново (build_maps сам) |
+
 ## Проверка
 - VALIDATION.md.
 - Хук ≤ 30 с, первое слово ≤ 0,5 с от начала.
