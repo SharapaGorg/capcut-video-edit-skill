@@ -81,7 +81,7 @@ description: Монтаж ролика — монтаж длинного YouTube
 | Проект | — | `scripts/capcut_new_project.py`, `scripts/common.py` |
 | 0 Транскрипция | references/stages/STAGE_0.md | `scripts/stage0/transcribe.py` |
 | 1 Смысловая резка | references/stages/STAGE_1.md | `scripts/stage1/{build_proposal,apply_cuts}.py` |
-| 2 Техническая резка + сборка | references/stages/STAGE_2.md | `scripts/stage2/{analyze,apply,verify,make_compound,adjust_on_circle,assemble}.py`, `scripts/layout/{xcorr,add_camera,fix_circle,fix_mask_type,wb_fix}.py` |
+| 2 Техническая резка + сборка | references/stages/STAGE_2.md | `scripts/stage2/{analyze,verify,apply,assemble,make_compound}.py`, `scripts/layout/{xcorr,add_camera,fix_circle,wb_fix}.py` |
 | 3 Карта таймкодов | references/stages/STAGE_3.md | `scripts/stage3/{build_maps,ripple_cut}.py` |
 | LAYOUT S/F | references/stages/STAGE_LAYOUT.md | `scripts/layout/{candidates,apply_layout,make_compound_f}.py` |
 | 4 Хук и концовка | references/stages/STAGE_4.md | `scripts/stage4/apply_hook.py` |

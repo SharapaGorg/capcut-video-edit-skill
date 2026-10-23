@@ -138,7 +138,9 @@ def harvest(project: Path) -> dict[str, dict]:
     out["mask_circle"] = material_tpl(
         "mask_circle", "common_mask", mask,
         "Circle mask for the camera circle. type mask, category video; path -> Cache/effect/<cache_id>/... "
-        "(cache_id differs from resource_id). config = position/size.")
+        "(cache_id differs from resource_id). config = position/size; clip = scale/transform of the circle segment.")
+    out["mask_circle"]["clip"] = sanitize(next((s.get("clip") for d in drafts for _t, s in seg_iter(d)
+                                                if mask["id"] in (s.get("extra_material_refs") or [])), None))
 
     # clip-level Adjust: a segment carrying temperature + saturation effects (+ hsl)
     refs = None
@@ -228,7 +230,66 @@ def harvest(project: Path) -> dict[str, dict]:
         "music_segment", lambda n: "музык" in n or "music" in n,
         "Music: like SFX + audio_fades. Deep is not included: make('deep_effect') + attach."),
         "music audio segment (track named Музыка/Music)")
+    out["compound"] = harvest_compound(project)
     return out
+
+
+def harvest_compound(project: Path) -> dict:
+    """Compound-clip skeletons from one video and one audio compound made by CapCut: drafts entry, nested
+    draft (no tracks/materials), subdraft wrapper + sub_draft_config, draft_meta_info entry (type 18), outer
+    material + extras + segment for each kind. Used by scripts/stage2/make_compound.py."""
+    root = json.loads((project / "draft_content.json").read_text(encoding="utf-8"))
+    ix = index(root["materials"])
+    found: dict[str, tuple] = {}
+    for t, s in seg_iter(root):
+        refs = [ix[e] for e in s.get("extra_material_refs") or [] if e in ix]
+        dm = next((m for k, m in refs if k == "drafts"), None)
+        if dm is None or s.get("material_id") not in ix:
+            continue
+        kind = "audio" if t.get("type") == "audio" else "video"
+        if kind not in found:
+            extra = [(k, m) for k, m in refs if k not in ("drafts", "audio_effects", "realtime_denoises")]
+            found[kind] = (dm, ix[s["material_id"]][1], extra, s)
+    need(found.get("video"), "video compound clip (outer segment with a drafts ref)")
+    need(found.get("audio"), "audio compound clip (outer segment with a drafts ref on an audio track)")
+    meta = json.loads((project / "draft_meta_info.json").read_text(encoding="utf-8"))
+    entry = need(next((g["value"][0] for g in meta.get("draft_materials", []) if g.get("type") == 18 and g.get("value")),
+                      None), "draft_meta_info entry of type 18")
+    dm_v = found["video"][0]
+    sub = project / "subdraft" / dm_v["draft"]["id"]
+    wrapper = json.loads((sub / "draft_content.json").read_text(encoding="utf-8"))
+    wrapper["tracks"] = []
+    wrapper["materials"] = {k: ([] if isinstance(v, list) else v) for k, v in wrapper["materials"].items()}
+    out = {"name": "compound", "category": None, "resource_id": None, "cache_id": None, "material": None,
+           "extra": [], "segment": None,
+           "drafts_entry": sanitize({k: v for k, v in dm_v.items() if k != "draft"}),
+           "nested": sanitize({k: v for k, v in dm_v["draft"].items() if k not in ("tracks", "materials")}),
+           "wrapper": sanitize(wrapper),
+           "sub_draft_config": sanitize(json.loads((sub / "sub_draft_config.json").read_text(encoding="utf-8"))),
+           "meta_entry": sanitize(entry),
+           "notes": "Compound clip skeletons (scripts/stage2/make_compound.py). Paths are set at runtime: "
+                    "drafts_entry paths via the CapCut draft-path placeholder, audio outer path -> "
+                    "Resources/combination/<combination_id>_audio.aac."}
+    for kind, (_dm, mat, extra, seg) in found.items():
+        out[kind] = {"material": sanitize(mat), "extra": [{"category": k, "material": sanitize(m)} for k, m in extra],
+                     "segment": seg_tpl(seg)}
+    for k in ("draft_file_path", "draft_cover_path", "draft_config_path"):
+        out["drafts_entry"][k] = ""
+    out["audio"]["material"]["path"] = ""
+    out["meta_entry"]["file_Path"] = ""
+    return _unname(out)
+
+
+_CNAME = re.compile(r"^Compound clip\d+$")
+
+
+def _unname(o):
+    """CapCut's own compound names -> "{{NAME}}" (make_compound sets the real name)."""
+    if isinstance(o, dict):
+        return {k: _unname(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_unname(v) for v in o]
+    return "{{NAME}}" if isinstance(o, str) and _CNAME.match(o) else o
 
 
 def main(argv=None):
@@ -237,9 +298,15 @@ def main(argv=None):
     g.add_argument("--project", help="CapCut project dir (com.lveditor.draft/<name>)")
     g.add_argument("--config", help="config.json of the video (uses project_dir)")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "assets" / "templates"))
+    ap.add_argument("--only", help="comma-separated template names to write (default: all)")
     a = ap.parse_args(argv)
     project = Path(a.project) if a.project else load_config(a.config).project_dir
-    res = harvest(project)
+    if a.only == "compound":
+        res = {"compound": harvest_compound(project)}
+    else:
+        res = harvest(project)
+    if a.only:
+        res = {k: v for k, v in res.items() if k in a.only.split(",")}
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for name, tpl in res.items():

@@ -11,7 +11,7 @@ import effects
 FIX = Path(__file__).parent / "fixtures" / "mini_project" / "draft_content.json"
 TPL = Path(__file__).resolve().parent.parent / "assets" / "templates"
 NAMES = ["voice_crisper", "reduce_noise", "deep_effect", "mask_circle", "adjust_circle",
-         "adjustment_block", "keyframes_zoom", "sfx_segment", "music_segment"]
+         "adjustment_block", "keyframes_zoom", "sfx_segment", "music_segment", "compound"]
 FORBIDDEN = ["writelo", "Гайд", "Гайд конкуренты", "IMG_E02", "E87DC4D2", "AiVideoEditing", "4-гайд", "shara"]
 
 

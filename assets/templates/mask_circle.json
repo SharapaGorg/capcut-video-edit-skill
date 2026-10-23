@@ -51,5 +51,21 @@
  },
  "extra": [],
  "segment": null,
- "notes": "Circle mask for the camera circle. type mask, category video; path -> Cache/effect/<cache_id>/... (cache_id differs from resource_id). config = position/size."
+ "notes": "Circle mask for the camera circle. type mask, category video; path -> Cache/effect/<cache_id>/... (cache_id differs from resource_id). config = position/size; clip = scale/transform of the circle segment.",
+ "clip": {
+  "scale": {
+   "x": 0.4,
+   "y": 0.4
+  },
+  "rotation": 0.0,
+  "transform": {
+   "x": 0.8069,
+   "y": -0.6815
+  },
+  "flip": {
+   "vertical": false,
+   "horizontal": false
+  },
+  "alpha": 1.0
+ }
 }

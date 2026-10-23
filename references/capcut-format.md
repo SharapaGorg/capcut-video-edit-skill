@@ -9,6 +9,8 @@
 ## Compound clip
 - Compound = внешний сегмент с материалом videos/audios; вложенный драфт — `materials.drafts[i].draft`; папка `subdraft/<id>/`; запись в `draft_meta_info.json`. Эталон — `scripts/stage2/make_compound.py`.
 - Вложенные сегменты — `draft.tracks[-1].segments`; время внутри = внешний `source_timerange`.
+- Compound внутри compound: его материал drafts CapCut хранит в КОРНЕВОМ `materials.drafts`, не во вложенном драфте — ссылка вложенного сегмента на drafts ищется вверх по предкам (`common.check_refs`, `common.flatten`). После резки compound в CapCut у каждого куска своя копия вложенного драфта.
+- Каркасы (drafts-запись, вложенный драфт, subdraft-обёртка, sub_draft_config, запись type 18, внешний материал/сегмент видео и аудио) — `assets/templates/compound.json` (`harvest_templates.py --only compound`). `##_draftpath_placeholder_0E685133-…_##` — константа CapCut, одинакова во всех проектах.
 - Имя вложенного драфта CapCut переписывает (например, на имя файла первого клипа) → искать драфт по ссылке сегмента (material_id → drafts), не по имени.
 - Аудио-compound пререндерится в `Resources/combination/<combination_id>_audio.aac` (`subdraft/<id>/sub_draft_config.json` → audio_path). После правки внутри: удалить .aac и очистить audio_path, иначе старый звук → рассинхрон. Видео-compound не пререндерится.
 

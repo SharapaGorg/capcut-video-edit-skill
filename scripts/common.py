@@ -6,6 +6,7 @@ bump update_time, then guard mtime (CapCut must not rewrite the file).
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import shutil
@@ -36,6 +37,7 @@ class Config:
     work_dir: Path = Path(".")
     tiktok_channel: str | None = None
     description_md: str | None = None
+    config_path: Path | None = None
 
 
 def detect_timeline_id(project_dir) -> str:
@@ -67,7 +69,19 @@ def load_config(path: str | None = None) -> Config:
         work_dir=Path(raw["work_dir"]) if raw.get("work_dir") else p.resolve().parent,
         tiktok_channel=raw.get("tiktok_channel"),
         description_md=raw.get("description_md"),
+        config_path=p.resolve(),
     )
+
+
+def save_config_field(cfg: Config, key: str, value) -> None:
+    """Set one top-level key in config.json (e.g. compounds after assemble) and in cfg."""
+    if cfg.config_path is None:
+        raise ValueError("cfg has no config_path (not loaded by load_config)")
+    raw = json.loads(cfg.config_path.read_text(encoding="utf-8"))
+    raw[key] = value
+    cfg.config_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    if hasattr(cfg, key):
+        setattr(cfg, key, value)
 
 
 def draft_paths(cfg: Config) -> list[Path]:
@@ -147,6 +161,88 @@ def write_draft(cfg: Config, draft: dict, stage: str, dry: bool,
     return bk
 
 
+def read_meta(cfg: Config) -> dict:
+    return json.loads((cfg.project_dir / "draft_meta_info.json").read_text(encoding="utf-8"))
+
+
+def write_meta(cfg: Config, meta: dict, dry: bool) -> None:
+    """draft_meta_info.json; call after write_draft (which made the backup and checked CapCut is closed)."""
+    if not dry:
+        _dump(cfg.project_dir / "draft_meta_info.json", meta)
+
+
+# ---- source files ----
+ROLE_DIRS = (("camera", "camera"), ("screencast", "screencasts"), ("voice", "voice"))
+
+
+def _norm(p) -> str:
+    return str(p).replace("\\", "/").rstrip("/").lower()
+
+
+@functools.lru_cache(maxsize=64)
+def _listing(d: str) -> frozenset:
+    p = Path(d)
+    return frozenset(x.name.lower() for x in p.iterdir() if x.is_file()) if p.is_dir() else frozenset()
+
+
+def source_role(cfg: Config, path: str) -> str | None:
+    """'camera' | 'screencast' | 'voice' | None for a material path: by folder prefix from cfg.sources,
+    else by file name present in that folder (the project may use a local copy of the sources)."""
+    if not path:
+        return None
+    p = _norm(path)
+    dirs = [(role, cfg.sources.get(key)) for role, key in ROLE_DIRS]
+    for role, d in dirs:
+        if d and p.startswith(_norm(d) + "/"):
+            return role
+    name = Path(str(path).replace("\\", "/")).name.lower()
+    for role, d in dirs:
+        if d and name in _listing(d):
+            return role
+    return None
+
+
+def _drafts_ix(d: dict, inherited: dict) -> dict:
+    """drafts materials visible inside d: its own + its ancestors' (CapCut keeps the drafts of a compound nested in
+    a compound in the ROOT materials.drafts, not in the nested draft)."""
+    own = {m["id"]: m for m in d.get("materials", {}).get("drafts", []) or [] if isinstance(m, dict) and "id" in m}
+    return {**inherited, **own}
+
+
+def flatten(cfg: Config, draft: dict, roles=("camera", "screencast", "voice")) -> list[dict]:
+    """Source pieces of the given roles, also inside compounds, in timeline time (us), sorted by start:
+    [{path, role, start, dur, src, speed, volume}]. Nested pieces are clipped to the window the outer segment shows;
+    speed of compound segments is applied (speed = effective speed of the piece)."""
+    out = []
+
+    def walk(d, off, k, lo, hi, dix):  # timeline = off + (time inside d) / k; visible window [lo, hi)
+        ix = index(d.get("materials", {}))
+        dix = _drafts_ix(d, dix)
+        for t in d.get("tracks", []):
+            for s in t.get("segments", []):
+                if s.get("material_id") not in ix:
+                    continue
+                m = ix[s["material_id"]][1]
+                dm = next((dix[e] for e in s.get("extra_material_refs") or [] if e in dix), None)
+                a = off + s["target_timerange"]["start"] / k
+                b = off + seg_end(s) / k
+                a2, b2 = max(a, lo), min(b, hi)
+                if b2 <= a2:
+                    continue
+                sp = float(s.get("speed", 1.0)) * k
+                src0 = (s.get("source_timerange") or {}).get("start", 0)
+                if dm is not None and isinstance(dm.get("draft"), dict):
+                    walk(dm["draft"], a - src0 / sp, sp, a2, b2, dix)
+                    continue
+                role = source_role(cfg, m.get("path", ""))
+                if role in roles:
+                    out.append({"path": m["path"], "role": role, "start": int(round(a2)), "dur": int(round(b2 - a2)),
+                                "speed": sp, "src": src0 + int(round((a2 - a) * sp)), "volume": float(s.get("volume", 1.0))})
+
+    walk(draft, 0, 1.0, 0, 1 << 62, {})
+    return sorted(out, key=lambda x: x["start"])
+
+
 # ---- ids, materials, time ----
 def new_id() -> str:
     return str(uuid.uuid4()).upper()
@@ -171,21 +267,23 @@ def mat_path(ix, seg) -> str:
 
 
 def check_refs(draft) -> list[str]:
-    """Dangling material refs in the draft and nested drafts (materials.drafts[].draft)."""
+    """Dangling material refs in the draft and nested drafts (materials.drafts[].draft). A nested segment may
+    reference a drafts material of an ancestor draft (compound inside a compound) — that is not dangling."""
     errs: list[str] = []
 
-    def walk(d, label):
+    def walk(d, label, dix):
         jx = index(d.get("materials", {}))
+        dix = _drafts_ix(d, dix)
         for t in d.get("tracks", []):
             for s in t.get("segments", []):
                 for mid in [s.get("material_id")] + list(s.get("extra_material_refs") or []):
-                    if mid and mid not in jx:
+                    if mid and mid not in jx and mid not in dix:
                         errs.append(f"{label}: dangling ref {mid} in segment {s.get('id')}")
         for dm in d.get("materials", {}).get("drafts", []) or []:
             if isinstance(dm.get("draft"), dict):
-                walk(dm["draft"], f"{label}/{dm.get('id')}")
+                walk(dm["draft"], f"{label}/{dm.get('id')}", dix)
 
-    walk(draft, "outer")
+    walk(draft, "outer", {})
     return errs
 
 

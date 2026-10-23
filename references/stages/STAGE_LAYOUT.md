@@ -15,7 +15,7 @@
 
 ## Часть A2. Камера кружком (этап 2 §7)
 - Камера поверх скринкаста должна быть отдельным слоем. Вшита в скринкаст → стоп, сообщить.
-- Маска Circle, позиция, масштаб, Adjust (Temp −18, Saturation 10) — из шаблонов `assets/templates/{mask_circle,adjust_circle}.json` (`scripts/layout/fix_circle.py`, `fix_mask_type.py`).
+- Маска Circle, позиция, масштаб, Adjust (Temp −18, Saturation 10) — из шаблонов `assets/templates/{mask_circle,adjust_circle}.json` (`scripts/layout/fix_circle.py`: маска type/path, геометрия, Adjust).
 - Одинаковые маска, позиция, масштаб и Adjust на всех кусках камеры в раскладке S.
 - Цвет кружка — Adjust на самом клипе. Не блок Adjustment: он перекрасит и скринкаст.
 - Лицо внутри круга: кадр из середины каждого куска (png) — лицо не обрезано. Обрезано → поправить позицию кадра внутри маски, не саму маску.
