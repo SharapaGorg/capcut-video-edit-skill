@@ -62,6 +62,54 @@ ZP_UP = 4                                # upscale before zoompan (sub-pixel cro
 ZOOM_ANCHOR = {'mic': (0.5, 0.34), 'high': (0.6, 0.3), 'arms': (0.5, 0.3), 'couch': (0.35, 0.32)}   # face centre, fraction of the frame
 VOICE_COMP = 'acompressor=threshold=-21dB:ratio=3.5:attack=4:release=90:makeup=1:knee=4,highshelf=g=-1.5:f=4500'   # the reference voice is dense (LRA ~ 4 LU)
 DEFAULT_ANGLE = 'high'
+# Platforms (references/shorts.md, «Три платформы»): the reel as written is Instagram Reels (<= 30 s, code word in the
+# voice CTA); --youtube = full cut + 2.5-s card kicker/line (<= 60 s); --tiktok = teaser (block "tiktok": {"sections":
+# [ids]}) + 2.5-s card «Полное видео на YouTube: <канал>» (<= 15 s, no links before 1000 followers).
+END_DUR = {'reels': 0.0, 'tiktok': 2.5, 'youtube': 2.5}
+LIMIT = {'reels': 30.0, 'tiktok': 15.0, 'youtube': 60.0}
+ANIM = ' data-dur="0.22" data-odur="0.25"'
+
+
+def esc(s): return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def apply_mode(spec, mode):
+    """Narrow the spec to the platform: block spec[mode] may list "sections" (ids kept, spec order) and "end" (card
+    text); "tiktok_channel" / "tiktok_thumbnail" at the top level or in the block. Returns the block."""
+    blk = dict(spec.get(mode) or {})
+    if blk.get('sections'):
+        keep = list(blk['sections']); have = {s['id'] for s in spec['sections']}
+        miss = [i for i in keep if i not in have]
+        if miss: raise SystemExit(f'{mode}: секций нет в спеке: {miss}')
+        spec['sections'] = [s for s in spec['sections'] if s['id'] in keep]
+        if spec.get('music_extra'): spec['music_extra'] = [m for m in spec['music_extra'] if m['section'] in keep]
+        mi = spec.get('music_in')
+        if isinstance(mi, str) and mi.startswith('after:') and mi[6:] not in keep: spec['music_in'] = 'after_hook'
+    for k in ('tiktok_channel', 'tiktok_thumbnail'):
+        if k in spec and k not in blk: blk[k] = spec[k]
+    return blk
+
+
+def end_html(mode, blk, t, base):
+    """End card over the dimmed last frame (markup = shorts/build.py html_end): TikTok -> YouTube thumbnail + channel;
+    YouTube -> kicker / line from blk["end"] (defaults «ПОЛНОЕ ВИДЕО» / «В ПРОФИЛЕ ↑»)."""
+    dim = f'<div class="dim" data-in="{t:.2f}" data-fx="fade" data-dist="0" data-dur="0.3"></div>'
+    if mode == 'tiktok':
+        ch = blk.get('tiktok_channel'); th = blk.get('tiktok_thumbnail'); img = ''
+        if th:
+            tp = Path(th) if Path(th).is_absolute() else base / th
+            if tp.is_file(): img = f'<img class="yt" src="{tp.resolve().as_uri()}" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="60"{ANIM}>'
+            else: th = None
+        if not th: print('  ВНИМАНИЕ: tiktok_thumbnail не задан/не найден — концовка без скрина превью YouTube')
+        if ch:
+            return (dim + '<div class="end tiktok">' + img +
+                    f'<span class="plate" data-in="{t + 0.1:.2f}" data-fx="pop" data-dist="40"{ANIM}>Полное видео на YouTube: {esc(ch)}</span></div>')
+        print('  ВНИМАНИЕ: tiktok_channel не задан — на карточке «ИЩИ ПО НАЗВАНИЮ ↑», имя канала не выдумывать')
+        return (dim + f'<div class="end tiktok"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>ПОЛНОЕ ВИДЕО НА YOUTUBE</span>'
+                + img + f'<span class="plate" data-in="{t + 0.7:.2f}" data-fx="pop" data-dist="40"{ANIM}>ИЩИ ПО НАЗВАНИЮ ↑</span></div>')
+    e = blk.get('end') or {}
+    return (dim + f'<div class="end"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>{esc(e.get("kicker", "ПОЛНОЕ ВИДЕО"))}</span>'
+            f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40"{ANIM}>{esc(e.get("line", "В ПРОФИЛЕ ↑"))}</span></div>')
 
 
 def fr(t): return int(round(t * FPS))
@@ -232,7 +280,8 @@ def plan(spec, words_all, speed=None, voice_dir=None, base=None):
                 pieces.append(p); out_t = p['out_out']
         sections.append(dict(id=sec['id'], idx=si, out_in=s_in, out_out=out_t, camera=sec.get('camera'),
                              angle=sec.get('angle') or angle_of(sec.get('camera')), n_words=len(sec_words)))
-    return dict(speed=speed, total=out_t, sections=sections, pieces=pieces, words=words)
+    end = float(spec.get('_end_dur', 0.0))
+    return dict(speed=speed, total=q(out_t + end), speech_end=out_t, end_dur=end, sections=sections, pieces=pieces, words=words)
 
 
 def clip_duration(path):
@@ -715,6 +764,8 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
             t = word_time(pl, sec['id'], sec['cta_word'], s_in, 'raise')
             o.append(f'<div class="rl cta" data-in="{t:.3f}" data-fx="pop" data-dur="0.25" style="top:{ang.get("cta_y", 1500)}px">{_html.escape(sec.get("cta_big") or sec["cta_word"].upper())}</div>')
             events.append(('tick', t))
+    if pl.get('end_dur'):      # last in the DOM: the dim covers every section element (the big CTA word included)
+        o.append(end_html(spec.get('_mode', 'reels'), spec.get('_mode_blk') or {}, pl['speech_end'], base)); events.append(('whoosh', pl['speech_end']))
     o.append('</body></html>')
     return '\n'.join(o), sorted(events, key=lambda e: e[1])
 
@@ -969,7 +1020,12 @@ def build_media(pl, spec, base, wd, cube):
             if sec.get('fisheye'): statics[('fisheye', sec['id'])] = sec['fisheye']
         list(ex.map(lambda p: piece_video(p, vdir, cube, pdir / f"v{p['idx']:03d}.mp4", zooms, statics), pl['pieces']))
     build_render.concat_list(wd / 'video.txt', [pdir / f"v{p['idx']:03d}.mp4" for p in pl['pieces']])
-    run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'video.txt'), '-c', 'copy', str(wd / 'video.mp4')])
+    if pl.get('end_dur'):       # the card sits on the dimmed, frozen last frame
+        run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'video.txt'), '-vf',
+             f"tpad=stop_mode=clone:stop_duration={pl['end_dur']:.3f},trim=end={T:.3f}", '-c:v', 'libx264', '-crf', '16', '-preset', 'medium',
+             '-pix_fmt', 'yuv420p', '-r', str(FPS), str(wd / 'video.mp4')])
+    else:
+        run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'video.txt'), '-c', 'copy', str(wd / 'video.mp4')])
     print(f'  видео: {fr(T)} кадров ({time.time() - t:.0f} с)')
 
 
@@ -1091,10 +1147,18 @@ def main(argv=None):
     ap.add_argument('--gfx-only', action='store_true', help='re-render the graphics and remux (video.mp4 / mix_final.m4a kept)')
     ap.add_argument('--skip-gfx', action='store_true', help='reuse work gfx.mov')
     ap.add_argument('--no-validate', action='store_true')
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument('--tiktok', action='store_true', help='TikTok teaser: block "tiktok" {sections}, 2.5-s card -> out/tiktok/<id>.mp4, <= 15 s')
+    g.add_argument('--youtube', action='store_true', help='YouTube Shorts: full cut + 2.5-s card (block "youtube" {end?}) -> out/youtube/<id>.mp4, <= 60 s')
     a = ap.parse_args(argv)
+    mode = 'tiktok' if a.tiktok else 'youtube' if a.youtube else 'reels'
     sp = Path(a.spec).resolve(); base = sp.parent
     spec = json.loads(sp.read_text(encoding='utf-8'))
     apply_palette(spec)
+    blk = apply_mode(spec, mode)
+    spec['_mode'], spec['_mode_blk'], spec['_end_dur'] = mode, blk, END_DUR[mode]
+    if mode != 'reels':
+        spec['out'] = f"out/{mode}/{spec['id']}.mp4"; spec['id'] = f"{spec['id']}_{mode}"
     wd = base / 'work' / spec['id']; wd.mkdir(parents=True, exist_ok=True)
     pl = plan(spec, load_words(base, spec), voice_dir=base / spec.get('voice_dir', '.'), base=base)
     for sec in spec['sections']:
@@ -1107,6 +1171,8 @@ def main(argv=None):
     print(f"план: {len(pl['pieces'])} кусков, {len(pl['words'])} слов, {pl['total']:.2f} с; SFX {len(events)}; {wd / 'gfx.html'}")
     for s in pl['sections']:
         print(f"  {s['id']:8} {s['out_in']:6.2f}–{s['out_out']:6.2f}  {s['camera'] or '—':14} {s['angle'] or ''}  {s['n_words']} слов")
+    if pl['total'] > LIMIT[mode] + 1e-6:
+        raise SystemExit(f"{mode}: {pl['total']:.2f} с > лимита {LIMIT[mode]:.0f} с (с карточкой) — сузить \"{mode}\".sections в спеке")
     if a.plan: return
     cube = cam_lut.REF_CUBE
     if not a.gfx_only:
