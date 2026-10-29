@@ -366,7 +366,9 @@ def render(html_path, n, mov):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         b = pw.chromium.launch(); page = b.new_page(viewport={'width': W, 'height': H}, device_scale_factor=1)
-        page.goto(Path(html_path).as_uri()); page.evaluate('document.fonts.ready'); page.evaluate('seek(0)')
+        page.goto(Path(html_path).as_uri()); page.evaluate('document.fonts.ready')
+        page.wait_for_function('Array.from(document.images).every(i => i.complete)', timeout=120000)   # frame sequences / logos decoded before the first screenshot
+        page.evaluate('seek(0)')
         cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'image2pipe', '-vcodec', 'png', '-r', str(FPS), '-i', '-',
                '-c:v', 'prores_ks', '-profile:v', '4444', '-pix_fmt', 'yuva444p10le', str(mov)]
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE); t = time.time()

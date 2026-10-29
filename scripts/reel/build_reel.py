@@ -334,6 +334,9 @@ CSS = f'''
 .dev .scr .logo {{ width:34%; margin-top:22%; aspect-ratio:1; border-radius:22%; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.6); }}
 .dev .scr .logo img {{ width:100%; height:100%; object-fit:cover; }}
 .dev .frm {{ position:absolute; left:0; top:0; display:block; }}
+.dev .scr .seq {{ position:absolute; inset:0; }}
+.dev .scr .seq img.sf {{ position:absolute; left:0; top:0; width:100%; height:100%; display:none; }}
+.dev .scr .seq img.sf.on {{ display:block; }}
 .ui {{ position:absolute; left:0; top:0; width:{W}px; height:{H}px; background:{UI_BG}; z-index:4; overflow:hidden; font-family:'Unbounded', sans-serif; color:#EDEDED; }}
 .ui .top {{ height:150px; display:flex; align-items:center; padding:0 60px; gap:24px; border-bottom:2px solid #1F1F1F; font-size:40px; font-weight:800; }}
 .ui .top .dot {{ width:22px; height:22px; border-radius:50%; background:{UI_ACCENT}; }}
@@ -466,6 +469,24 @@ DEVICE_FRAMES = {   # frame png -> (outer box, screen hole) in png px: MockUPhon
 }
 
 
+def screen_frames_html(video, w, h, t0, t_out):
+    """Frames of `video` for the phone screen: <video>.frames_<w>x<h>/%04d.jpg at FPS (cached by mtime), as hidden
+    <img> elements with data-fi; the page shows the one for floor((t - t0) * FPS), clamped to the last frame."""
+    fdir = video.parent / f'{video.stem}.frames_{w}x{h}'
+    stamp = fdir / 'stamp.txt'; want = f'{video.stat().st_mtime_ns} {w} {h} {FPS}'
+    if not (stamp.is_file() and stamp.read_text() == want):
+        if fdir.is_dir():
+            for f in fdir.glob('*.jpg'): f.unlink()
+        fdir.mkdir(exist_ok=True)
+        run(['ffmpeg', '-v', 'error', '-y', '-i', str(video), '-vf', f'fps={FPS},scale={w}:{h}:flags=lanczos', '-q:v', '2', str(fdir / '%04d.jpg')])
+        stamp.write_text(want)
+    frames = sorted(fdir.glob('*.jpg'))
+    if not frames: raise SystemExit(f'экран: нет кадров из {video}')
+    n_need = fr(t_out - t0) + 1
+    imgs = ''.join(f'<img class="sf" data-fi="{i}" src="{f.resolve().as_uri()}" alt="">' for i, f in enumerate(frames[:n_need]))
+    return f'<div class="seq" data-t0="{t0:.4f}" data-fps="{FPS}" data-n="{min(len(frames), n_need)}">{imgs}</div>'
+
+
 def device_html(d, t, t_out, base):
     """A phone mockup: spec section "device" {frame: png path, model: iphone13promax, at_word, out_word?, x, y, w,
     screen?: image/video path shown inside the screen hole, logo?: app tile on a dark screen}. Entry: the phone
@@ -480,8 +501,12 @@ def device_html(d, t, t_out, base):
     if scr:
         sp = Path(scr) if Path(scr).is_absolute() else base / scr
         if not sp.is_file(): raise SystemExit(f'экран не найден: {sp}')
-        inner = (f'<video src="{sp.resolve().as_uri()}" muted></video>' if sp.suffix.lower() in ('.mp4', '.mov', '.webm')
-                 else f'<img src="{sp.resolve().as_uri()}" alt="">')
+        if sp.suffix.lower() in ('.mp4', '.mov', '.webm'):
+            # a video is not seekable from seek(t) in a screenshot page: it becomes a jpg sequence (one per output
+            # frame, sized to the screen hole, the last frame held till t_out) toggled by seekExtra in the page
+            inner = screen_frames_html(sp, int(round(sw * k)), int(round(sh * k)), t + 0.15, t_out)
+        else:
+            inner = f'<img src="{sp.resolve().as_uri()}" alt="">'
     elif d.get('logo'):
         lp = Path(d['logo']) if Path(d['logo']).is_absolute() else base / d['logo']
         if not lp.is_file(): raise SystemExit(f'логотип не найден: {lp}')
@@ -581,6 +606,12 @@ def scheme_card(sec, sp, pl):
     return card
 
 
+SEQ_JS = """(function(){const prev=window.seekExtra;window.seekExtra=function(t){if(prev)prev(t);
+document.querySelectorAll('.seq').forEach(q=>{const t0=+q.dataset.t0,fps=+q.dataset.fps,n=+q.dataset.n;
+let i=Math.floor((t-t0)*fps+1e-6);if(i<0)i=0;if(i>n-1)i=n-1;
+q.querySelectorAll('img.sf').forEach(im=>im.classList.toggle('on',+im.dataset.fi===i));});};})();"""
+
+
 def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
     """The one 1080x1920 page of the reel (anim.js data-in / seek(t) in output seconds). Returns (html, events) where
     events = [(kind, t)] for the SFX: tick / whoosh."""
@@ -588,7 +619,7 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
     css_href = css_href or (SCRIPTS / 'shorts' / 'shorts.css').as_uri()
     anim_href = anim_href or (SCRIPTS / 'graphics' / 'html' / 'anim.js').as_uri()
     o = [f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="{css_href}"><script src="{anim_href}"></script>',
-         f'<style>{CSS}</style></head><body>']
+         f'<style>{CSS}</style><script>{SEQ_JS}</script></head><body>']
     events = []
     secs = {s['id']: s for s in pl['sections']}
     for si, sec in enumerate(spec['sections']):
