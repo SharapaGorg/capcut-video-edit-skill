@@ -31,6 +31,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import rmap  # noqa: E402
 import build_render as R  # noqa: E402
+import scheme  # noqa: E402
 from build_render import CAM_H, fr, q, strip  # noqa: E402
 
 MAXGAP = 0.30          # a pause longer than this is cut
@@ -38,8 +39,8 @@ GAP_KEEP_BEFORE, GAP_KEEP_AFTER = 0.08, 0.12
 FILLERS = {'так', 'значит', 'короче', 'соответственно', 'ну', 'вот', 'блин'}
 END_DUR = {'shorts': 2.5, 'reels': 4.0, 'tiktok': 2.5}      # end card / CTA, s
 LIMIT = {'shorts': 60.0, 'reels': 30.0, 'tiktok': 15.0}      # whole video incl. the card, s
-HOOK_DUR = 2.4
-DYN_GAP, DYN_HOOK = 0.12, 1.5   # --tiktok dynamic mode: pauses 0.12 s, hook 1.5 s, punch-in x1.18 on every 2nd cut
+HOOK_DUR, DYN_HOOK = R.HOOK_DUR, R.DYN_HOOK   # hook card 2.4 s; --tiktok dynamic mode 1.5 s (also the music start, profile ref)
+DYN_GAP = 0.12                  # --tiktok dynamic mode: pauses 0.12 s, punch-in x1.18 on every 2nd cut
 DYN_MAXPIECE = 2.6              # dynamic mode: a longer piece is split on a word boundary (punch-in every ~2 s)
 HOOK_TOP = {'stack': CAM_H + 50, 'full': 1120, 'scfull': 380}   # text never on the face: stack -> on the screencast
 CAP_TOP = {'stack': 790, 'full': 1500, 'scfull': 1560}
@@ -214,7 +215,38 @@ def plan(ctx: Ctx, spec: dict) -> dict:
     if ctx.dyn:
         pieces = split_long(ctx, pieces, words_out)
         for i, p in enumerate(pieces): p['punch'] = bool(i % 2) and p['layout'] != 'full' and not p.get('keys')
-    return dict(id=spec['id'], total=total, total_with_end=total + ctx.end_dur, pieces=pieces, words=words_out, captions=caps)
+    pl = dict(id=spec['id'], total=total, total_with_end=total + ctx.end_dur, pieces=pieces, words=words_out, captions=caps)
+    plan_schemes(ctx, spec, pl)
+    return pl
+
+
+def plan_schemes(ctx, spec, pl):
+    """Full-screen schemes (cards type: scheme, scheme.py): words / nodes / pans mapped to short time (same mapping as
+    the captions), every word must lie inside the scheme and inside a kept piece (else error with the word); the scheme
+    never overlaps the hook; captions inside its interval are dropped (the panel hides the video). -> pl['schemes']
+    [{id, s_in, s_out, sfx: [{t, kind: node|pan}]}] for the SFX of the mix."""
+    out = []
+    for c in spec.get('cards', []):
+        if c.get('type') != 'scheme': continue
+        try:
+            card = scheme.normalize(c)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        bad = scheme.validate(card, lambda t: any(p['tl0'] - 0.001 <= t <= p['tl1'] + 0.001 for p in pl['pieces']))
+        if bad: raise SystemExit(f"схема {card['id']}: " + '; '.join(bad))
+        s_in, s_out = tl2s(ctx, pl, card['start']), tl2s(ctx, pl, card['end'])
+        if spec.get('hook') and s_in < spec['hook'].get('dur', hook_dur(ctx)) + 0.35:
+            raise SystemExit(f"схема {card['id']} начинается на {s_in:.2f} с — под хуком (хук до {spec['hook'].get('dur', hook_dur(ctx)) + 0.35:.2f} с); сдвинуть start")
+        if s_out - s_in < 1.0: raise SystemExit(f"схема {card['id']}: {s_out - s_in:.2f} с в шортсе (слова вырезаны?)")
+        caps = []
+        for cp in pl['captions']:
+            if s_in - 0.005 <= cp['t_in'] < s_out - 0.005: continue
+            if cp['t_in'] < s_in < cp['t_out']: cp = dict(cp, t_out=round(s_in, 3))
+            caps.append(cp)
+        pl['captions'] = caps
+        out.append(dict(id=card['id'], s_in=round(s_in, 3), s_out=round(s_out, 3),
+                        sfx=[dict(t=round(tl2s(ctx, pl, t), 3), kind=k) for k, t in scheme.events(card)]))
+    pl['schemes'] = out
 
 
 def split_long(ctx, pieces, words_out):
@@ -339,6 +371,8 @@ def tl2s(ctx, pl, t):
 def html_cards(ctx, spec, pl):
     out = []
     for c in spec.get('cards', []):
+        if c.get('type') == 'scheme':      # full-screen opaque panel (scheme.py); times through the same tl -> s map
+            out.append(scheme.html_fragment(scheme.normalize(c), lambda t: tl2s(ctx, pl, t), ctx.cfg.work_dir)); continue
         tin = tl2s(ctx, pl, c['tl_in']); tout = tl2s(ctx, pl, c['tl_out'])
         if spec.get('hook'): tin = max(tin, spec['hook'].get('dur', hook_dur(ctx)) + 0.35)      # only after the hook is gone
         top = c.get('top', 920)
@@ -445,7 +479,7 @@ def main(argv=None):
         ts = [0.5, 1.5] + [min(pl['total'] - 0.5, x) for x in (5, 12, 20, 30, 40)] + [pl['total'] + 1.5, T - 0.5]
         R.preview_frames(wd, final, sorted(set(round(x, 2) for x in ts if 0 <= x < T)))
         final = R.deliver(wfinal, out / f"{sid}_{spec['slug']}.mp4", rep)     # out of norm -> exit 1, stays in work/
-        print(f"  -> {final}  I={rep['final_I']} LUFS TP={rep['final_TP']}  (голос до: {rep['voice_lufs_pre']:.1f}"
+        print(f"  -> {final}  I={rep['final_I']} LUFS TP={rep['final_TP']}  (профиль {rep['profile']}, голос до: {rep['voice_lufs_pre']:.1f}"
               + (f", музыка {rep['gain_music']:+.1f} dB" if rep['gain_music'] is not None else ', без музыки') + ')')
 
 

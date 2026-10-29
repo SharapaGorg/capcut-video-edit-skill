@@ -25,7 +25,8 @@ SKIP_DIRS = {".git", ".superpowers", "__pycache__", ".pytest_cache"}
 # Exempt by design (checked below so the list stays honest):
 #   init_video.py          creates config.json, there is none yet
 #   capcut_new_project.py  creates a NEW project folder (EXPERIMENTAL), not an edit of config's project
-NO_CONFIG = {"init_video.py", "capcut_new_project.py", "beats.py"}   # beats.py: library + debug print, no argparse
+NO_CONFIG = {"init_video.py", "capcut_new_project.py", "beats.py", "voice_ref.py",   # beats.py: library + debug print, no argparse; voice_ref.py: audio file -> file, no project
+             "build_reel.py", "validate_reel.py"}                                     # reel from scratch: a spec path, no CapCut project / config.json
 
 
 def _skill_files():

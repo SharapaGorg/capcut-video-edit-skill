@@ -1,0 +1,113 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<!-- Схема «кто есть кто» (type: scheme, references/shorts.md): полноэкранная вставка, узлы по словам речи. Пример-заглушка: иконки — встроенные силуэты. seek(t) в консоли, t от начала схемы. -->
+<link rel="stylesheet" href="../../../scripts/shorts/shorts.css"><script src="../../../scripts/graphics/html/anim.js"></script></head><body>
+<style>
+.swhoiswho.scheme { position:absolute; left:0; top:0; width:1080px; height:1920px; overflow:hidden; z-index:5;
+  background: radial-gradient(120% 60% at 50% 100%, #60260A 0%, #371606 45%, #000000 100%); }
+.swhoiswho .grid { position:absolute; left:-2160px; top:-3840px; width:5400px; height:9600px;
+  background-image: linear-gradient(rgba(255,255,255,.22) 3px, transparent 3px), linear-gradient(90deg, rgba(255,255,255,.22) 3px, transparent 3px);
+  background-size: 108px 108px; background-position: 34px 80px; }
+.swhoiswho .world { position:absolute; left:0; top:0; }
+.swhoiswho svg.arcs { position:absolute; left:-3000px; top:-3000px; width:6000px; height:6000px; overflow:visible; }
+.swhoiswho svg.arcs path.dash { fill:none; stroke:#E1E1E1; stroke-width:5; stroke-dasharray:14 17; stroke-linecap:round; }
+.swhoiswho svg.arcs mask path { fill:none; stroke:#fff; stroke-width:12; }
+.swhoiswho .node { position:absolute; width:0; height:0; }
+.swhoiswho .ic { position:absolute; left:-202px; top:-202px; width:404px; height:404px; border-radius:50%; overflow:hidden;
+  filter: drop-shadow(0 0 30px rgba(255,255,255,.8)); }
+.swhoiswho .ic svg, .swhoiswho .ic img { width:100%; height:100%; display:block; object-fit:cover; }
+.swhoiswho .ic.pl { left:-286px; top:-122px; width:572px; height:244px; border-radius:36px; background:#fff; color:#111; display:flex; align-items:center;
+  justify-content:center; font-family: Arial, Helvetica, sans-serif; font-weight:900; font-size:150px; letter-spacing:-.02em;
+  box-shadow:0 0 26px rgba(255,255,255,.75); filter:none; }
+.swhoiswho .ic.pl img { width:auto; height:auto; max-width:520px; max-height:196px; object-fit:contain; }
+.swhoiswho .ic.pl svg.n { width:70px; height:140px; margin:0 -6px; }
+.swhoiswho .cap { position:absolute; left:-540px; top:282px; width:1080px; display:flex; flex-direction:column; align-items:center; gap:0; }
+.swhoiswho .cap .line { display:flex; justify-content:center; gap:14px; }
+.swhoiswho .cap .w { font-family:'Unbounded', sans-serif; font-weight:700; font-size:50px; line-height:1.3; color:#FBFBFB;
+  text-shadow:0 2px 6px rgba(0,0,0,.6); white-space:nowrap; text-transform:none; }
+.swhoiswho .cap .num { font-weight:800; font-size:84px; line-height:1.2; color:#F8DE03; letter-spacing:-.03em; text-shadow:0 0 18px #F8DE038C; }
+.swhoiswho .node.pl .cap { top:202px; }
+</style>
+<div class="scheme swhoiswho" data-in="0.000" data-out="10.000" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="grid"></div>
+<div class="world" data-cam='[["0.000", 0, 0], ["1.500", 830, 900], ["5.700", 390, 1860]]' data-pan="0.45">
+<svg class="arcs" viewBox="-3000 -3000 6000 6000"><defs>
+<mask id="mwhoiswho_0"><path d="M0 0 Q830 0 830 900" pathLength="1" stroke-dasharray="1" class="draw" data-t="1.600" data-dur="0.35"/></mask>
+<mask id="mwhoiswho_1"><path d="M830 900 Q390 900 390 1860" pathLength="1" stroke-dasharray="1" class="draw" data-t="5.800" data-dur="0.35"/></mask>
+</defs>
+<path class="dash" d="M0 0 Q830 0 830 900" mask="url(#mwhoiswho_0)"/>
+<path class="dash" d="M830 900 Q390 900 390 1860" mask="url(#mwhoiswho_1)"/>
+</svg>
+<div class="node" style="left:0px;top:0px">
+<div class="pop" data-t="0.100" data-dur="0.35"><div class="ic"><svg viewBox="0 0 404 404"><circle cx="202" cy="202" r="202" fill="#49504F"/><clipPath id="cavwhoiswho"><circle cx="202" cy="202" r="202"/></clipPath><g clip-path="url(#cavwhoiswho)"><circle cx="202" cy="166" r="72" fill="#F3F3F3"/><path d="M80 420 C80 318 130 290 202 290 C274 290 324 318 324 420Z" fill="#F3F3F3"/><path d="M118 150h168v14h-14v22h-62v-22h-16v22h-62v-22h-14z" fill="#111"/></g></svg></div></div>
+<div class="cap" data-in="0.150" data-out="0.950" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="0.150" data-fx="slide-up" data-dist="28" data-dur="0.12">мой</span><span class="w word" data-in="0.300" data-fx="slide-up" data-dist="28" data-dur="0.12">коллега</span><span class="w word" data-in="0.450" data-fx="slide-up" data-dist="28" data-dur="0.12">и</span><span class="w word" data-in="0.550" data-fx="slide-up" data-dist="28" data-dur="0.12">товарищ</span></div>
+</div>
+<div class="cap" data-in="1.000" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="1.000" data-fx="slide-up" data-dist="28" data-dur="0.12">Алексей</span><span class="w word" data-in="1.200" data-fx="slide-up" data-dist="28" data-dur="0.12">Завар</span></div>
+</div>
+</div>
+<div class="node" style="left:830px;top:900px">
+<div class="pop" data-t="1.950" data-dur="0.35"><div class="ic"><svg viewBox="0 0 404 404"><circle cx="202" cy="202" r="202" fill="#2D234A"/><path d="M202 10 L300 404 L104 404Z" fill="#3A2F5C" opacity=".6"/><path d="M60 280 L190 78 L170 300Z" fill="#F5F2FF"/><path d="M212 78 L344 280 L228 300Z" fill="#C9B6F2"/><path d="M196 92 L198 320 L186 300Z M208 92 L206 320 L218 300Z" fill="#F5F2FF"/></svg></div></div>
+<div class="cap" data-in="2.200" data-out="3.050" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="2.200" data-fx="slide-up" data-dist="28" data-dur="0.12">создатель</span><span class="w word" data-in="2.400" data-fx="slide-up" data-dist="28" data-dur="0.12">AyuGram</span></div>
+</div>
+<div class="cap" data-in="3.100" data-out="3.550" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="3.100" data-fx="slide-up" data-dist="28" data-dur="0.12">телеграм-клиента</span></div>
+</div>
+<div class="cap" data-in="3.600" data-out="4.050" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="3.600" data-fx="slide-up" data-dist="28" data-dur="0.12">с</span><span class="w word" data-in="3.700" data-fx="slide-up" data-dist="28" data-dur="0.12">более</span><span class="w word" data-in="3.850" data-fx="slide-up" data-dist="28" data-dur="0.12">чем</span></div>
+</div>
+<div class="cap" data-in="4.100" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="num word" data-in="4.100" data-fx="slide-up" data-dist="28" data-dur="0.12">1 000 000</span></div>
+<div class="line"><span class="w word" data-in="4.500" data-fx="slide-up" data-dist="28" data-dur="0.12">активных</span><span class="w word" data-in="4.750" data-fx="slide-up" data-dist="28" data-dur="0.12">пользователей</span></div>
+<div class="line"><span class="w word" data-in="5.400" data-fx="slide-up" data-dist="28" data-dur="0.12">ежемесячно</span></div>
+</div>
+</div>
+<div class="node pl" style="left:390px;top:1860px">
+<div class="pop" data-t="6.120" data-dur="0.35"><div class="ic pl"><span class="fpt">FU</span><svg viewBox="0 0 60 120" class="n"><path d="M30 2 L52 34 H38 V86 H52 L30 118 L8 86 H22 V34 H8Z" fill="#52A0E6"/><path d="M12 30 L48 90" stroke="#111" stroke-width="12"/></svg><span class="fpt">PAY</span></div></div>
+<div class="cap" data-in="6.150" data-out="7.050" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="6.150" data-fx="slide-up" data-dist="28" data-dur="0.12">и</span><span class="w word" data-in="6.250" data-fx="slide-up" data-dist="28" data-dur="0.12">продукта</span><span class="w word" data-in="6.350" data-fx="slide-up" data-dist="28" data-dur="0.12">для</span><span class="w word" data-in="6.400" data-fx="slide-up" data-dist="28" data-dur="0.12">продавцов</span></div>
+</div>
+<div class="cap" data-in="7.100" data-out="8.050" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="7.100" data-fx="slide-up" data-dist="28" data-dur="0.12">на</span><span class="w word" data-in="7.200" data-fx="slide-up" data-dist="28" data-dur="0.12">площадке</span><span class="w word" data-in="7.400" data-fx="slide-up" data-dist="28" data-dur="0.12">FUNPAY</span></div>
+</div>
+<div class="cap" data-in="8.100" data-fx="cut" data-ofx="cut" data-dur="0.01" data-odur="0.01">
+<div class="line"><span class="w word" data-in="8.100" data-fx="slide-up" data-dist="28" data-dur="0.12">более</span><span class="w word" data-in="8.250" data-fx="slide-up" data-dist="28" data-dur="0.12">чем</span><span class="w word" data-in="8.400" data-fx="slide-up" data-dist="28" data-dur="0.12">на</span></div>
+<div class="line"><span class="num word" data-in="8.700" data-fx="slide-up" data-dist="28" data-dur="0.12">50 000</span></div>
+<div class="line"><span class="w word" data-in="8.900" data-fx="slide-up" data-dist="28" data-dur="0.12">пользователей</span></div>
+</div>
+</div>
+</div></div>
+<script>
+(function () {
+  const easeIO = p => p < .5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3) / 2;
+  const easeOut = p => 1 - Math.pow(1 - p, 3);
+  const back = p => { const c = 1.4; return 1 + c * Math.pow(p - 1, 3) + (c - 1) * Math.pow(p - 1, 2); };  // overshoot ~8 %
+  const S = document.querySelector('.scheme.swhoiswho');
+  const Wd = S.querySelector('.world'), CAM = JSON.parse(Wd.dataset.cam), PAN = parseFloat(Wd.dataset.pan);
+  const CX = 540.0, CY = 870, G = 108;
+  const prev = window.seekExtra;
+  window.seekExtra = function (t) {
+    if (prev) prev(t);
+    let x = CAM[0][1], y = CAM[0][2];
+    for (let i = 1; i < CAM.length; i++) {
+      const t0 = parseFloat(CAM[i][0]); if (t < t0) break;
+      const p = easeIO(Math.min(1, (t - t0) / PAN));
+      x = CAM[i-1][1] + (CAM[i][1] - CAM[i-1][1]) * p; y = CAM[i-1][2] + (CAM[i][2] - CAM[i-1][2]) * p;
+    }
+    Wd.style.transform = `translate(${CX - x}px, ${CY - y}px)`;
+    S.querySelector('.grid').style.transform = `translate(${(CX - x) % G}px, ${(CY - y) % G}px)`;
+    S.querySelectorAll('mask path.draw').forEach(p => {
+      const t0 = parseFloat(p.dataset.t), d = parseFloat(p.dataset.dur);
+      const q = t < t0 ? 0 : easeOut(Math.min(1, (t - t0) / d));
+      p.style.strokeDashoffset = 1 - q;
+    });
+    S.querySelectorAll('.pop').forEach(el => {
+      const t0 = parseFloat(el.dataset.t), d = parseFloat(el.dataset.dur);
+      const p = t < t0 ? 0 : Math.min(1, (t - t0) / d);
+      el.style.transform = `scale(${p <= 0 ? 0 : back(p)})`; el.style.opacity = p > 0 ? 1 : 0;
+    });
+  };
+})();
+</script>
+</body></html>

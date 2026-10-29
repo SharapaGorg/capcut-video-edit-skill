@@ -36,7 +36,13 @@ MIN_TRAIN = 6                        # aligned training frames at least
 LIPS_HUE, LIPS_WIDTH, LIPS_DESAT = 350.0, 14.0, 0.30     # lips ~351°, skin ~7–12° (measured on the first video)
 
 
+REF_CUBE = Path(__file__).resolve().parents[2] / "assets" / "ref_joint.cube"   # editor's look, fitted on 98 frame pairs (refs/train/color)
+
+
 def cube_path(cfg) -> Path:
+    """color_profile "ref" (default) = the bundled reference LUT; "master" = per-video calibration by master_render."""
+    if getattr(cfg, "color_profile", "ref") == "ref":
+        return REF_CUBE
     return cfg.work_dir / "stage12_shorts" / "cam.cube"
 
 
@@ -271,7 +277,7 @@ def run(cfg, times=None):
                          "проверьте master_render и master_maps")
     print(f"  кадров: {len(S)} обучение, {len(rows)} тест")
     lut = fit_global(np.concatenate(S), np.concatenate(R))
-    out = cube_path(cfg)
+    out = cfg.work_dir / "stage12_shorts" / "cam.cube"   # calibration always goes to the work dir, never over assets/ref_joint.cube
     write_cube(lut, out)
     sheet_rows = []
     for c, s, r, sf, rf, valid in rows:

@@ -43,6 +43,8 @@ class Config:
     master_maps: str | None = None        # maps of the timeline master_render came from; None = <work_dir>/stage3
     description_md: str | None = None
     tessdata: str | None = None      # folder with rus/eng.traineddata if the tesseract install lacks rus
+    audio_profile: str = "ref"       # shorts mix: "ref" (editor's reference, spectrum matching) | "legacy" (references/shorts.md §5)
+    color_profile: str = "ref"       # shorts camera: "ref" (assets/ref_joint.cube, editor's look) | "master" (cam_lut.py calibration by master_render)
     config_path: Path | None = None
 
 
@@ -82,6 +84,8 @@ def load_config(path: str | None = None, strict: bool | None = None) -> Config:
         master_maps=raw.get("master_maps"),
         description_md=raw.get("description_md"),
         tessdata=raw.get("tessdata"),
+        audio_profile=raw.get("audio_profile") or "ref",
+        color_profile=raw.get("color_profile") or "ref",
         config_path=p.resolve(),
     )
     if strict is None:

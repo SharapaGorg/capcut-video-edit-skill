@@ -12,6 +12,7 @@ description: Монтаж ролика — монтаж длинного YouTube
 - Новый ролик: «вот исходники, вот проект» / «вот исходники».
 - Продолжение: «дальше», «этап N», правки по просмотру черновика/экспорта.
 - Короткие: шортсы, рилсы, тиктоки из готового ролика.
+- Рилс с нуля из сырья и сценария (микрофон m4a + камера MOV по кускам, без CapCut и без длинного ролика) — references/reel.md.
 - Вне скилла: превью (thumbnail), загрузка на площадки.
 
 ## Вход
@@ -39,7 +40,7 @@ cwd = рабочая папка ролика (там `config.json`); скрип�
 - `fps`/`width`/`height` — из драфта проекта (`init_video.py`); повторный запуск `init_video.py` дописывает конфиг, не затирая (`--force` — перезаписать).
 - `compounds` заполняет этап 2 §7 после сборки.
 - `sfx_dir`, `music_dir` неизвестны → спросить один раз.
-- Короткие (shorts.md): `tiktok_channel` / `tiktok_thumbnail` — концовка TikTok, `reels_word` — кодовое слово рилса, `master_maps` — карты таймлайна мастера, если он доделан в копии проекта (по умолчанию `stage3`).
+- Короткие (shorts.md): `tiktok_channel` / `tiktok_thumbnail` — концовка TikTok, `reels_word` — кодовое слово рилса, `master_maps` — карты таймлайна мастера, если он доделан в копии проекта (по умолчанию `stage3`). `audio_profile` — звук шортсов: `ref` (эталон монтажёра, по умолчанию) / `legacy`. `color_profile` — цвет камеры в шортсах: `ref` (`assets/ref_joint.cube`, look монтажёра, по умолчанию; `master_render` не нужен) / `master` (калибровка `cam_lut.py` по рендеру мастера). Эталон целиком — references/reference-style.md.
 - Рабочая папка: `transcript/`, `stage1/` … `stage12_shorts/`, `backups/`, `PROGRESS.md`.
 
 ## Порядок
@@ -96,9 +97,10 @@ cwd = рабочая папка ролика (там `config.json`); скрип�
 | 8 Фразы и заставки | references/stages/STAGE_8.md, references/graphics.md | то же |
 | 9 Музыка | references/stages/STAGE_9.md | `scripts/stage9/{prepare,beats,build_voice,apply_music,music_gain,measure_lufs,check_mix}.py` |
 | 10 Экспорт и YouTube | references/stages/STAGE_10.md | `scripts/stage10/{build_srt,loudnorm}.py` |
-| Shorts | references/shorts.md | `scripts/shorts/{build,build_render,cam_lut,rmap}.py` |
+| Shorts | references/shorts.md | `scripts/shorts/{build,build_render,voice_ref,cam_lut,rmap,scheme}.py` (scheme — полноэкранная схема «кто есть кто») |
 | Reels | references/reels.md | `scripts/shorts/build.py --reels` |
 | TikTok | references/tiktok.md | `scripts/shorts/build.py --tiktok` |
+| Рилс с нуля | references/reel.md | `scripts/reel/{build_reel,validate_reel}.py` (спека + whisper-слова → mp4; схема, UI-макеты, стикеры, мемы, музыка, −17.5 LUFS) |
 
-Общие правила — [references/rules.md](references/rules.md). Проверки — [references/validation.md](references/validation.md). Формат CapCut и подводные камни — [references/capcut-format.md](references/capcut-format.md). Графика — [references/graphics.md](references/graphics.md).
+Общие правила — [references/rules.md](references/rules.md). Эталон монтажёра (звук/цвет/дизайн, профили `ref`) — [references/reference-style.md](references/reference-style.md). Проверки — [references/validation.md](references/validation.md). Формат CapCut и подводные камни — [references/capcut-format.md](references/capcut-format.md). Графика — [references/graphics.md](references/graphics.md).
 Шаблоны JSON CapCut — `assets/templates/`, шрифт — `assets/Unbounded-var.ttf`, образцы графики — `assets/examples/html/`, образец спеки — `assets/examples/specs/example.json`.

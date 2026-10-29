@@ -20,6 +20,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "stage10"))
 import cam_lut  # noqa: E402
+import voice_ref  # noqa: E402  (profile «ref»: spectrum matching to the editor's reference)
 from loudnorm import measure  # noqa: E402  (shared EBU R128 / true-peak meter of the export stage)
 
 FPS = 30; W, H = 1080, 1920
@@ -35,8 +36,24 @@ VOICE_FX = ('highpass=f=80,equalizer=f=250:t=q:w=1:g=-1.5,highshelf=g=5:f=2500:t
             'equalizer=f=5000:t=q:w=1.2:g=1.5,acompressor=threshold=-20dB:ratio=2.5:attack=5:release=120:makeup=2')
 VOICE_LUFS, MUSIC_REL, SFX_PEAK = -19.0, -13.0, -22.0   # music = voice −13 LU; whoosh peak −22 dBFS before the final gain
 FINAL_I, FINAL_TOL, FINAL_TP, FINAL_ITER = -14.0, 0.5, -1.1, 6
+# Audio profiles (config.json "audio_profile", default "ref"):
+#   legacy — the constants above: fixed VOICE_FX (CapCut Crisper spectrum), −14 LUFS final, music −13 LU, from 0 s.
+#   ref    — the editor's reference shorts (references/shorts.md §5 «Профиль ref»): voice chain fitted per short by
+#            spectrum matching (voice_ref.match_fx), final −17.5 ±0.5 LUFS / TP ≤ −1.0, music −16 LU under the voice,
+#            music starts at the hook end (spec "music_in", s) with a 0.3-s fade-in.
+PROFILES = {
+    'legacy': dict(voice_fx=VOICE_FX, voice_lufs=VOICE_LUFS, music_rel=MUSIC_REL, final_i=FINAL_I, final_tol=FINAL_TOL,
+                   final_tp=FINAL_TP, music_fade_in=0.8, music_in=None),
+    'ref': dict(voice_fx=None, voice_lufs=-17.5, music_rel=-16.0, final_i=-17.5, final_tol=0.5, final_tp=-1.0,
+                music_fade_in=0.3, music_in='hook'),
+    'loud': dict(voice_fx=None, voice_lufs=-14.0, music_rel=-18.0, final_i=-14.0, final_tol=0.5, final_tp=-1.0,
+                 music_fade_in=0.3, music_in='hook'),   # reel 14 v15: −17.5 was «too quiet without headphones»
+}
+DEFAULT_PROFILE = 'ref'
+HOOK_DUR, DYN_HOOK = 2.4, 1.5   # hook card, s (shorts/reels; --tiktok dynamic mode)
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 WHOOSH_HINTS = ("вуш", "whoosh", "swoosh")     # default whoosh: first file in sfx_dir (recursive) with one in its name
+TICK_HINTS = ("tick", "клик", "click")          # tick of a scheme node pop (no file -> skipped with a log line)
 
 ZOOM_BASE_MAX = 0.10       # background: slow wave 1.00 <-> 1.10
 ZOOM_PERIOD = 10.0         # wave period, s
@@ -123,7 +140,8 @@ def camlut(ctx) -> str:
 def need_cube(ctx):
     p = cam_lut.cube_path(ctx.cfg)
     if not p.is_file():
-        raise SystemExit(f"нет {p}: сначала scripts/shorts/cam_lut.py --config … (калибровка цвета камеры по master_render)")
+        raise SystemExit(f"нет {p}: color_profile=master → сначала scripts/shorts/cam_lut.py --config … (калибровка по master_render)")
+    print(f"  цвет камеры: color_profile={getattr(ctx.cfg, 'color_profile', 'ref')} → {p.name}")
 
 
 @functools.lru_cache(maxsize=1)
@@ -412,6 +430,28 @@ def whoosh_file(ctx, spec):
     return hit[0]
 
 
+def tick_file(ctx, spec):
+    """spec "tick" (a path inside sfx_dir or absolute), else the first file in sfx_dir (recursive, sorted) whose name
+    has «tick»/«клик»/«click». None (no sfx_dir / no such file) -> a log line, the scheme nodes pop without a tick."""
+    d = ctx.cfg.sfx_dir
+    if spec.get('tick'):
+        p = _pick(spec['tick'], d or '.')
+        if not p.is_file(): raise SystemExit(f'тик не найден: {p}')
+        return p
+    if not d or not Path(d).is_dir():
+        print('  схема: sfx_dir не задан — узлы без тика'); return None
+    files = sorted((p for p in Path(d).rglob('*') if p.suffix.lower() in AUDIO_EXT), key=lambda p: p.as_posix().lower())
+    hit = [p for p in files if any(h in p.name.lower() for h in TICK_HINTS)]
+    if not hit:
+        print(f'  схема: в sfx_dir нет файла с «tick» / «клик» / «click» в имени — узлы без тика (задать "tick" в спеке)'); return None
+    print(f'  тик: {hit[0].name} (другой — "tick" в спеке)')
+    return hit[0]
+
+
+def scheme_hits(pl, kind):
+    return [e['t'] for s in pl.get('schemes', []) for e in s['sfx'] if e['kind'] == kind]
+
+
 def _gain_lim(pre, out, g, lim):
     run(['ffmpeg', '-v', 'error', '-y', '-i', str(pre), '-af',
          f"aresample=192000,volume={g:.2f}dB,alimiter=limit={10 ** (lim / 20):.4f}:attack=3:release=80:level=false,"
@@ -420,17 +460,35 @@ def _gain_lim(pre, out, g, lim):
     return measure(out)
 
 
-def in_norm(I, tp):
-    return abs(I - FINAL_I) <= FINAL_TOL and tp <= FINAL_TP
+def profile(name=None) -> dict:
+    """PROFILES[name] (+ 'name'); None -> DEFAULT_PROFILE. Unknown -> SystemExit."""
+    name = name or DEFAULT_PROFILE
+    if name not in PROFILES:
+        raise SystemExit(f'config.json → audio_profile "{name}": нет такого профиля, есть {sorted(PROFILES)}')
+    return dict(PROFILES[name], name=name)
 
 
-def final_loop(pre, out, iters=None):
-    """Final gain + limiter -> AAC, measured AFTER AAC, until −14 ±0.5 LUFS and TP <= −1.1 (at most FINAL_ITER passes).
+def hook_end(ctx, spec) -> float:
+    """End of the hook card, s (0 without a hook)."""
+    hk = spec.get('hook')
+    return float(hk.get('dur', DYN_HOOK if ctx.dyn else HOOK_DUR)) if hk else 0.0
+
+
+def in_norm(I, tp, prof=None):
+    prof = prof or profile('legacy')
+    return abs(I - prof['final_i']) <= prof['final_tol'] and tp <= prof['final_tp']
+
+
+def final_loop(pre, out, iters=None, prof=None):
+    """Final gain + limiter -> AAC, measured AFTER AAC, until final_i ±final_tol LUFS and TP <= final_tp of the profile
+    (legacy: −14 ±0.5 / −1.1; ref: −17.5 ±0.5 / −1.0), at most FINAL_ITER passes.
     Gain step = secant over the last two (gain, I) passes at the same limiter level (behind the limiter 1 dB of gain
     gives less than 1 LU on peaky voice; a full-error step undershoots forever), clamped to 1..12 dB per pass and
     never into a region already known to overshoot/undershoot. TP over → the limiter goes down and the secant restarts.
     The best pass (in norm, else the nearest to −14 with TP ok) is kept in `out`. -> {I, TP, gain, limit, passes, ok}"""
     iters = iters or FINAL_ITER
+    prof = prof or profile('legacy')
+    FINAL_I, FINAL_TOL, FINAL_TP = prof['final_i'], prof['final_tol'], prof['final_tp']
     I_pre = measure(pre)['I']
     g, lim = FINAL_I - I_pre + 1.0, -2.0
     hist, best = [], None
@@ -439,11 +497,11 @@ def final_loop(pre, out, iters=None):
         m = _gain_lim(pre, tmp, g, lim)
         I, tp = m['I'], m['TP']
         print(f'  громкость, проход {n}: гейн {g:+.2f} dB, лимит {lim:.1f} dBFS -> I {I} LUFS, TP {tp}')
-        key = (not in_norm(I, tp), tp > FINAL_TP, abs(I - FINAL_I))
+        key = (not in_norm(I, tp, prof), tp > FINAL_TP, abs(I - FINAL_I))
         if best is None or key < best[0]:
-            best = (key, dict(I=I, TP=tp, gain=round(g, 2), limit=round(lim, 2), passes=n, ok=in_norm(I, tp)))
+            best = (key, dict(I=I, TP=tp, gain=round(g, 2), limit=round(lim, 2), passes=n, ok=in_norm(I, tp, prof)))
             shutil.copy(tmp, out)
-        if in_norm(I, tp):
+        if in_norm(I, tp, prof):
             break
         if tp > FINAL_TP:                         # peaks: lower the ceiling, keep the gain, restart the secant
             lim -= tp - FINAL_TP + 0.1
@@ -466,42 +524,80 @@ def final_loop(pre, out, iters=None):
 def deliver(wd_final, out_final, rep):
     """Copy the final to out/ only when the loudness is in norm; else stop with exit 1 and leave it in work/."""
     if not rep['in_norm']:
-        raise SystemExit(f"громкость вне нормы: I {rep['final_I']} LUFS, TP {rep['final_TP']} (нужно −14 ±0.5, TP ≤ −1.1) — "
+        prof = profile(rep.get('profile', 'legacy'))
+        raise SystemExit(f"громкость вне нормы: I {rep['final_I']} LUFS, TP {rep['final_TP']} "
+                         f"(нужно {prof['final_i']} ±{prof['final_tol']}, TP ≤ {prof['final_tp']}) — "
                          f"файл оставлен в {wd_final}, в out/ не скопирован; проверить микс (report*.json → loop)")
     Path(out_final).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(wd_final, out_final)
     return Path(out_final)
 
 
+def voice_chain(ctx, spec, wd, prof):
+    """The -af string for voice_raw.wav: the profile's fixed chain, or (ref) the chain fitted by spectrum matching to
+    voice_raw.wav — fit written to work/<id>/voice_match.json, band gains printed."""
+    if prof['voice_fx']:
+        return prof['voice_fx']
+    fx = voice_ref.match_fx(wd / 'voice_raw.wav', report=wd / 'voice_match.json')
+    info = voice_ref.match_fx.last
+    print('  EQ по спектру (dB): ' + ' '.join(f"{k}:{g:+.1f}" for k, g in info['gains'].items())
+          + f"  ({len(info['passes'])} прох., {'в допуске ±2 dB' if info['ok'] else 'ВНЕ допуска ±2 dB — см. voice_match.json'})")
+    return fx
+
+
+def music_in_s(ctx, spec, prof, T):
+    """Music start, s: legacy 0; ref = spec "music_in" or the hook end, clamped to [0, T − 2]."""
+    if prof['music_in'] is None:
+        return 0.0
+    m_in = float(spec['music_in']) if spec.get('music_in') is not None else hook_end(ctx, spec)
+    return min(max(m_in, 0.0), max(T - 2.0, 0.0))
+
+
 def mix(ctx, spec, pl, wd, final, gfx):
     total = pl['total']; T = total + ctx.end_dur
-    run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'voice_raw.wav'), '-af', VOICE_FX, str(wd / 'voice.wav')])
+    prof = profile(getattr(ctx.cfg, 'audio_profile', None))
+    print(f"  профиль звука: {prof['name']} (голос {prof['voice_lufs']} LUFS до микса, музыка {prof['music_rel']:+.0f} LU, "
+          f"финал {prof['final_i']} ±{prof['final_tol']} LUFS, TP ≤ {prof['final_tp']})")
+    VOICE_LUFS, MUSIC_REL, FINAL_I, FINAL_TOL, FINAL_TP = (prof[k] for k in ('voice_lufs', 'music_rel', 'final_i', 'final_tol', 'final_tp'))
+    run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'voice_raw.wav'), '-af', voice_chain(ctx, spec, wd, prof), str(wd / 'voice.wav')])
     v = measure(wd / 'voice.wav')['I']; gv = VOICE_LUFS - v
     music, whoosh = music_file(ctx, spec), whoosh_file(ctx, spec)
     ins = ['-i', str(wd / 'voice.wav')]
     parts = [f"[0:a]volume={gv:.2f}dB,apad=whole_dur={T:.3f}[v]"]; labels = ['[v]']
     gm = gs = None
+    m_in = music_in_s(ctx, spec, prof, T)
     if music:
         ins += ['-stream_loop', '-1', '-i', str(music)]; k = ins.count('-i') - 1
         gm = VOICE_LUFS + MUSIC_REL - measure(music)['I']
-        parts.append(f"[{k}:a]atrim=end={T:.3f},volume={gm:.2f}dB,afade=t=in:d=0.8,afade=t=out:st={T - 1.5:.3f}:d=1.5[m]"); labels.append('[m]')
+        delay = f",adelay={int(round(m_in * 1000))}:all=1" if m_in > 0 else ''
+        parts.append(f"[{k}:a]atrim=end={T - m_in:.3f},volume={gm:.2f}dB,afade=t=in:d={prof['music_fade_in']},"
+                     f"afade=t=out:st={T - m_in - 1.5:.3f}:d=1.5{delay}[m]"); labels.append('[m]')
     if whoosh:
         ins += ['-i', str(whoosh)]; k = ins.count('-i') - 1
         tp = measure(whoosh)['TP']; gs = SFX_PEAK - tp
         hits = [(0.1, gs), (total, gs)]                       # under the hook and the end card
         if ctx.dyn:                                           # tiktok: quiet whoosh on every punch-in cut
             hits += [(p['s0'], DYN_SFX_PEAK - tp) for p in pl['pieces'] if p.get('punch') and p['s0'] > 0.6]
+        hits += [(t, gs) for t in scheme_hits(pl, 'pan')]     # scheme: camera pan -> whoosh
         for n, (t, g) in enumerate(hits):
             parts.append(f"[{k}:a]volume={g:.2f}dB,adelay={int(t * 1000)}|{int(t * 1000)}[s{n}]"); labels.append(f'[s{n}]')
+    ticks = scheme_hits(pl, 'node')
+    tick = tick_file(ctx, spec) if ticks else None
+    if tick:                                                  # scheme: node pop -> tick (words: no SFX)
+        ins += ['-i', str(tick)]; k = ins.count('-i') - 1
+        gt = SFX_PEAK - measure(tick)['TP']
+        for n, t in enumerate(ticks):
+            parts.append(f"[{k}:a]volume={gt:.2f}dB,adelay={int(t * 1000)}|{int(t * 1000)}[t{n}]"); labels.append(f'[t{n}]')
     fc = ';'.join(parts) + ';' + ''.join(labels) + f"amix=inputs={len(labels)}:normalize=0:duration=first[a]"
     # pass 1: the mix without the final gain, measured
     run(['ffmpeg', '-v', 'error', '-y', *ins, '-filter_complex', fc, '-map', '[a]', '-t', f'{T:.3f}', '-c:a', 'pcm_f32le', str(wd / 'mix_pre.wav')])
-    loud = final_loop(wd / 'mix_pre.wav', wd / 'mix_final.m4a')
+    loud = final_loop(wd / 'mix_pre.wav', wd / 'mix_final.m4a', prof=prof)
     run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'video.mp4'), '-i', str(gfx), '-i', str(wd / 'mix_final.m4a'),
          '-filter_complex', f"[0:v]tpad=stop_mode=clone:stop_duration={ctx.end_dur}[v0];[v0][1:v]overlay=format=auto:shortest=1[vo]",
          '-map', '[vo]', '-map', '2:a', '-t', f'{T:.3f}', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', str(FPS),
          '-c:a', 'copy', '-movflags', '+faststart', str(final)])
     fin = measure(final)
-    return dict(voice_lufs_pre=v, gain_voice=gv, gain_music=gm, gain_sfx=gs, music=str(music) if music else None,
-                whoosh=str(whoosh) if whoosh else None, loop=loud, final_I=fin['I'], final_TP=fin['TP'],
-                in_norm=abs(fin['I'] - FINAL_I) <= FINAL_TOL and fin['TP'] <= FINAL_TP)
+    return dict(profile=prof['name'], voice_lufs_pre=v, gain_voice=gv, gain_music=gm, gain_sfx=gs, music_in=m_in,
+                music=str(music) if music else None, whoosh=str(whoosh) if whoosh else None, tick=str(tick) if tick else None,
+                loop=loud, voice_match=voice_ref.match_fx.last['gains'] if prof['voice_fx'] is None else None,
+                final_I=fin['I'], final_TP=fin['TP'], in_norm=abs(fin['I'] - FINAL_I) <= FINAL_TOL and fin['TP'] <= FINAL_TP)

@@ -1,5 +1,6 @@
 /* Shorts 1080x1920, style «Монолит» (as scripts/graphics/html/base.css, gfx.css): white text, accent #D46A40, plate #0A0A0A */
 @font-face { font-family: 'Unbounded'; src: url('../../assets/Unbounded-var.ttf') format('truetype'); font-weight: 200 900; }
+@font-face { font-family: 'Oswald'; src: url('../../assets/Oswald-var.ttf') format('truetype'); font-weight: 200 700; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body { width: 1080px; height: 1920px; overflow: hidden; position: relative; font-family: 'Unbounded', sans-serif; -webkit-font-smoothing: antialiased; color: #FFFFFF; }
 .abs { position: absolute; }

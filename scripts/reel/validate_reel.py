@@ -1,0 +1,169 @@
+"""Surface validation of a reel built by build_reel.py (no iteration loops): loudness, voice spectrum vs the reference
+bands, camera colour statistics vs the reference numbers, a 1-fps contact sheet, a side-by-side sheet with the
+reference video at matching moments, word-timing frames. Writes work/<id>/VALIDATION.md (Russian), sheet.jpg,
+compare.jpg, check/*.png. Called at the end of build_reel.py; standalone:
+
+    python -X utf8 scripts/reel/validate_reel.py reel_spec.json
+"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent / 'shorts')); sys.path.insert(0, str(HERE.parent / 'stage10'))
+import voice_ref  # noqa: E402
+from loudnorm import measure  # noqa: E402
+
+# the editor's reference B (refs/train/color/REPORT.md, «B эталон»): 10 camera frames, mean
+REF_COLOR = dict(ymin=16, ymax=230, y50=118, y95=179, satavg=9.8, satmax=70, mids_rg=23.6, mids_bg=-17.8)
+COMPARE = [('hook', 1.0), ('scheme', 'миллионом'), ('gotcha', 'попались'), ('service', 'искать'), ('team', 'партнер'), ('cta', 'курс')]
+REF_MOMENTS = {'hook': 1.5, 'scheme': 10.9, 'gotcha': 18.9, 'service': 20.6, 'team': 28.5, 'cta': 46.3}   # s of the reference video
+
+
+def run(cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode: raise RuntimeError(' '.join(map(str, cmd[:12])) + '\n' + r.stderr[-1500:])
+    return r
+
+
+def frame(path, t, w=None):
+    """RGB uint8 frame at t (scaled to width w when given)."""
+    vf = f'scale={w}:-2' if w else 'null'
+    r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{t:.3f}', '-i', str(path), '-frames:v', '1', '-vf', f'{vf},format=rgb24', '-f', 'rawvideo', '-'], capture_output=True)
+    wh = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', str(path)]).stdout.strip().split(',')
+    W, H = int(wh[0]), int(wh[1])
+    if w: H = int(round(H * w / W / 2)) * 2; W = w
+    a = np.frombuffer(r.stdout, np.uint8)
+    if a.size < W * H * 3: return None
+    return a[:W * H * 3].reshape(H, W, 3)
+
+
+def color_stats(img):
+    """ffmpeg-signalstats-like numbers from an RGB frame: Y min/max/50/95 (tv-range luma), SATAVG/SATMAX (chroma
+    radius as signalstats), mids R−G / B−G (pixels with Y 0.25–0.65)."""
+    f = img.astype(np.float32)
+    r, g, b = f[..., 0], f[..., 1], f[..., 2]
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    yt = 16 + y * 219 / 255
+    cb = (b - y) / 1.8556; cr = (r - y) / 1.5748
+    sat = np.hypot(cb, cr)
+    m = (y > 0.25 * 255) & (y < 0.65 * 255)
+    return dict(ymin=float(yt.min()), ymax=float(yt.max()), y50=float(np.percentile(yt, 50)), y95=float(np.percentile(yt, 95)),
+                satavg=float(sat.mean()), satmax=float(np.percentile(sat, 99.9)),
+                mids_rg=float((r - g)[m].mean()) if m.any() else 0.0, mids_bg=float((b - g)[m].mean()) if m.any() else 0.0)
+
+
+def band_window(final, t0, t1, wd):
+    """Voice band spectrum of the output over [t0, t1] (a window with voice only, before the music)."""
+    tmp = wd / 'voice_window.wav'
+    run(['ffmpeg', '-v', 'error', '-y', '-ss', f'{t0:.3f}', '-t', f'{t1 - t0:.3f}', '-i', str(final), '-ac', '1', '-ar', '48000', str(tmp)])
+    return voice_ref.spectrum_of(tmp)
+
+
+def word_start(pl, section, name):
+    key = re.sub(r'[^\wа-яё]+', '', name.lower())
+    for w in pl['words']:
+        if w['section'] == section and re.sub(r'[^\wа-яё]+', '', w['word'].lower()).startswith(key):
+            return w
+    return None
+
+
+def run_all(spec, pl, base, wd, out, rep=None, reference=None):
+    import cv2
+    md = [f"# Проверка рилса {spec['id']}", '']
+    T = pl['total']
+    # (a) loudness
+    m = measure(out)
+    ok_l = abs(m['I'] + 17.5) <= 0.5 and m['TP'] <= -1.0
+    md += ['## (a) Громкость (ebur128 после AAC)', f"I = {m['I']} LUFS (норма −17.5 ±0.5), TP = {m['TP']} dBTP (≤ −1.0), LRA = {m['LRA']} → {'ОК' if ok_l else 'ВНЕ НОРМЫ'}", '']
+    # (b) voice spectrum on a voice-only window (the first section, before music_in)
+    secs = {s['id']: s for s in pl['sections']}
+    first = next((s_ for s_ in pl['sections'] if not s_.get('clip')), pl['sections'][0])   # clip sections carry their own processed sound
+    m_in = (rep or {}).get('music_in', first['out_out'])
+    t0, t1 = first['out_in'] + 0.2, min(first['out_out'], m_in) - 0.1
+    if t1 - t0 < 0.5: t1 = min(first['out_out'] - 0.1, t0 + 2.5)   # music from 0 (no hook): measure with the music, best effort
+    sp = band_window(out, t0, t1, wd)
+    rows = ['| полоса | выход | эталон | Δ |', '|---|---|---|---|']
+    ok_b = True
+    for k, ref in voice_ref.REF_BANDS.items():
+        lo, hi = (int(x) for x in k.split('-'))
+        d = sp[k] - ref; fitted = lo >= voice_ref.FIT_LO and hi <= voice_ref.FIT_HI
+        if fitted and abs(d) > voice_ref.TOL_DB: ok_b = False
+        rows.append(f"| {k} | {sp[k]:+.1f} | {ref:+.1f} | {d:+.1f}{'' if fitted else ' (не подгоняется)'} |")
+    md += [f'## (b) Спектр голоса (окно {t0:.1f}–{t1:.1f} с, только голос, dB отн. 500–1000 Гц)'] + rows + [f"80 Гц–8 кГц ±2 dB: {'ОК' if ok_b else 'ВНЕ допуска'}", '']
+    # (c) colour of 10 camera frames
+    cam_secs = [s for s in pl['sections'] if s['camera']]
+    times = []
+    total_cam = sum(s['out_out'] - s['out_in'] for s in cam_secs)
+    for k in range(10):
+        x = (k + 0.5) * total_cam / 10
+        for s in cam_secs:
+            d = s['out_out'] - s['out_in']
+            if x <= d: times.append(round(s['out_in'] + x, 2)); break
+            x -= d
+    stats = [color_stats(frame(out, t)) for t in times]
+    mean = {k: float(np.mean([s[k] for s in stats])) for k in REF_COLOR}
+    md += ['## (c) Цвет камеры (10 кадров: ' + ', '.join(f'{t:.1f}' for t in times) + ' с; среднее)',
+           '| | выход | эталон B |', '|---|---|---|']
+    for k in REF_COLOR: md.append(f'| {k} | {mean[k]:.1f} | {REF_COLOR[k]} |')
+    md.append('Y в tv-диапазоне; SATAVG/SATMAX — радиус хромы как signalstats; mids — пиксели с Y 0.25–0.65. Разница mids R−G/B−G в пределах ±5 — тот же тёплый баланс.')
+    md.append('')
+    # (d) sheets
+    sheet = wd / 'sheet.jpg'
+    n = int(T) + 1; cols = 10; rows_n = (n + cols - 1) // cols
+    run(['ffmpeg', '-v', 'error', '-y', '-i', str(out), '-vf', f'fps=1,scale=216:384,tile={cols}x{rows_n}:padding=4:color=gray', '-frames:v', '1', '-q:v', '4', str(sheet)])
+    cmp_ = wd / 'compare.jpg'
+    ref = (base / (reference or spec.get('reference'))) if (reference or spec.get('reference')) else None
+    pairs = []
+    for sec_id, mom in COMPARE:
+        if sec_id not in secs: continue
+        t = secs[sec_id]['out_in'] + mom if isinstance(mom, float) else (word_start(pl, sec_id, mom) or {}).get('start')
+        if t is None: continue
+        t += 0.25 if not isinstance(mom, float) else 0
+        a = frame(out, t, 270)
+        b = frame(ref, REF_MOMENTS.get(sec_id, 0), 270) if ref and ref.is_file() else None
+        if a is None: continue
+        if b is None: b = np.zeros_like(a)
+        b = cv2.resize(b, (a.shape[1], a.shape[0]))
+        tile = np.concatenate([a, b], 1)
+        cv2.putText(tile, f'{sec_id} {t:.2f}s | ref {REF_MOMENTS.get(sec_id, 0)}s', (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        pairs.append(tile)
+    if pairs:
+        hh = max(p.shape[0] for p in pairs)
+        pairs = [np.pad(p, ((0, hh - p.shape[0]), (0, 0), (0, 0))) for p in pairs]
+        grid = np.concatenate([np.concatenate(pairs[i:i + 3] + [np.zeros_like(pairs[0])] * (3 - len(pairs[i:i + 3])), 1) for i in range(0, len(pairs), 3)], 0)
+        ok, buf = cv2.imencode('.jpg', cv2.cvtColor(grid, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 88])   # imencode: cv2.imwrite fails silently on a non-ASCII path
+        cmp_.write_bytes(buf.tobytes())
+    md += ['## (d) Листы', f'- {sheet} — 1 кадр/с', f"- {cmp_} — выход | эталон в 6 моментах (хук, узел схемы, «попались», сервис, мемы, CTA){'' if ref and ref.is_file() else ' (эталон не задан — правая половина чёрная)'}", '']
+    # (e) word-timing frames: 3 words, a frame at word start + 2 frames
+    chk = wd / 'check'; chk.mkdir(exist_ok=True)
+    picks = []
+    for sec_id, name in (('hook', 'фриланса'), ('team', 'задолго'), ('cta', 'курс'), ('gotcha', 'попались'), ('service', 'искать')):
+        w = word_start(pl, sec_id, name) if sec_id in secs else None
+        if w: picks.append((sec_id, w))
+        if len(picks) == 3: break
+    lines = []
+    for sec_id, w in picks:
+        for dt, tag in ((-0.1, 'before'), (0.08, 'at')):
+            t = max(0, w['start'] + dt)
+            run(['ffmpeg', '-v', 'error', '-y', '-ss', f'{t:.3f}', '-i', str(out), '-frames:v', '1', '-vf', 'scale=540:-2', str(chk / f"{sec_id}_{w['word']}_{tag}.png")])
+        lines.append(f"- «{w['word']}» ({sec_id}) старт {w['start']:.2f} с → check/{sec_id}_{w['word']}_before.png (−0.1 с) и _at.png (+0.08 с)")
+    md += ['## (e) Кадры на словах (слово должно быть на _at и отсутствовать на _before)'] + lines + ['', '## Что увидел', '(заполняется по листам после сборки)', '']
+    (wd / 'VALIDATION.md').write_text('\n'.join(md), encoding='utf-8')
+    print(f"проверка: I {m['I']} TP {m['TP']}; спектр {'ok' if ok_b else 'вне'}; mids R−G {mean['mids_rg']:+.1f} B−G {mean['mids_bg']:+.1f}; {sheet.name}, {cmp_.name}, {wd / 'VALIDATION.md'}")
+    return dict(loud=m, spectrum=sp, color=mean, ok_loud=ok_l, ok_spectrum=ok_b)
+
+
+if __name__ == '__main__':
+    spp = Path(sys.argv[1]).resolve(); base = spp.parent
+    spec = json.loads(spp.read_text(encoding='utf-8'))
+    wd = base / 'work' / spec['id']
+    pl = json.loads((wd / 'plan.json').read_text(encoding='utf-8'))
+    rep = json.loads((wd / 'report.json').read_text(encoding='utf-8')) if (wd / 'report.json').is_file() else None
+    run_all(spec, pl, base, wd, base / spec['out'], rep, sys.argv[2] if len(sys.argv) > 2 else None)

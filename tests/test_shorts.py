@@ -158,6 +158,10 @@ def test_cam_lut_requires_master_render(tmp_path):
     # the decode chain of the build = the calibration chain
     ctx = build.load(cp)
     assert build_render.camlut(ctx).startswith(cam_lut.SRC_VF + ",lut3d=file=")
+    assert "ref_joint.cube" in build_render.camlut(ctx) and cam_lut.REF_CUBE.is_file()   # default color_profile = ref
+    raw["color_profile"] = "master"
+    cp.write_text(json.dumps(raw), encoding="utf-8")
+    ctx = build.load(cp)
     assert "stage12_shorts" in build_render.camlut(ctx) and "cam.cube" in build_render.camlut(ctx)
 
 
