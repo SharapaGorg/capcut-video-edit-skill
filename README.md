@@ -33,6 +33,8 @@ python -X utf8 ~/.claude/skills/video-edit/scripts/captions/run.py <рилс>/au
 python -X utf8 ~/.claude/skills/video-edit/scripts/captions/run.py <рилс>/auto render --sfx-dir <папка пака SFX>
 ```
 
+Референсы, на которых обучен стиль (что взято, что нет и почему), — [REFERENCES.md](REFERENCES.md).
+
 Руками пишется один файл — `<рилс>/auto/captions/layout.py`. Пак звуков в репозиторий не входит: имена файлов — словарь `S` в `scripts/captions/audio.py`.
 
 ## Установка

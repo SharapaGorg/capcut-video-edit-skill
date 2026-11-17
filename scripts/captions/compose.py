@@ -37,6 +37,8 @@ with sync_playwright() as p:
     page.goto(Path(html).resolve().as_uri())
     page.evaluate("window.ready")
     sil = page.evaluate("SIL")          # [[from, to, fill_y or null], ...]
+    rims = page.evaluate("typeof RIM === 'undefined' ? [] : RIM")        # [[from, to, [r, g, b], width], ...]
+    flashes = page.evaluate("typeof FLASH === 'undefined' ? [] : FLASH")  # [[from, to, kind, [r, g, b]], ...]
     print("BIG", json.dumps(page.evaluate("BIG"), ensure_ascii=False))
 
     boxes = {}
@@ -66,6 +68,13 @@ with sync_playwright() as p:
                 cov = float((ba * pa[..., 0]).sum() / max(1.0, ba.sum()))
                 o = over(o, back)
             o = o * (1 - pa) + person * pa
+        rm = next((x for x in rims if x[0] <= f < x[1]), None)
+        if rm:                                          # outline around the person: the matte edge, dilated
+            import cv2
+            m = (A > 128).astype(np.uint8); k = 2 * int(rm[3]) + 1
+            edge = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) - m
+            ea = cv2.GaussianBlur(edge.astype(np.float32), (0, 0), 1.2)[..., None]
+            o = o * (1 - ea) + np.array(rm[2], np.float32) * ea
         for lay in (back, front):                      # text bounding box per frame, for the safe-zone check
             if lay is not None:
                 ys, xs = np.where(lay[..., 3] > 40)
@@ -73,6 +82,13 @@ with sync_playwright() as p:
                                         max(boxes.get(f, [0] * 4)[2], int(xs.max())), max(boxes.get(f, [0] * 4)[3], int(ys.max()))]
         if front is not None:
             o = over(o, front)
+        fl = next((x for x in flashes if x[0] <= f < x[1]), None)
+        if fl:                                          # flash on a hard cut
+            if fl[2] == "invert": o = 255 - o
+            elif fl[2] == "white": o = o * .2 + 255 * .8
+            else:                                       # duo: two-tone poster, light = cream, dark = accent
+                lum = (o @ np.array([.299, .587, .114], np.float32))[..., None]
+                o = np.where(lum > 105, CREAM, np.array(fl[3], np.float32))
         return np.clip(o + 0.5, 0, 255).astype(np.uint8), cov
 
     if stills:

@@ -107,4 +107,4 @@ cwd = рабочая папка ролика (там `config.json`); скрип�
 | Описание рилса | references/description.md | — |
 
 Общие правила — [references/rules.md](references/rules.md). Эталон монтажёра (звук/цвет/дизайн, профили `ref`) — [references/reference-style.md](references/reference-style.md). Проверки — [references/validation.md](references/validation.md). Формат CapCut и подводные камни — [references/capcut-format.md](references/capcut-format.md). Графика — [references/graphics.md](references/graphics.md).
-Шаблоны JSON CapCut — `assets/templates/`, шрифт — `assets/Unbounded-var.ttf`, образцы графики — `assets/examples/html/`, образец спеки — `assets/examples/specs/example.json`. «Слова за головой»: шрифты, модель маски, музыка — `assets/captions/`, раскладки и раскадровки — `assets/examples/captions/`.
+Шаблоны JSON CapCut — `assets/templates/`, шрифт — `assets/Unbounded-var.ttf`, образцы графики — `assets/examples/html/`, образец спеки — `assets/examples/specs/example.json`. «Слова за головой»: шрифты, модель маски, музыка — `assets/captions/`, раскладки и раскадровки — `assets/examples/captions/`, список референсов стиля — `REFERENCES.md`.

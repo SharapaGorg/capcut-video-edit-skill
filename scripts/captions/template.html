@@ -5,6 +5,7 @@
 @font-face{font-family:"Playfair Display";src:url("/*FONTS*//Playfair-Italic.ttf");font-style:italic;font-weight:400 900}
 @font-face{font-family:"Oswald";src:url("/*FONTS*//Oswald.ttf");font-weight:200 700}
 @font-face{font-family:"JetBrains Mono";src:url("/*FONTS*//JetBrainsMono.ttf");font-weight:100 800}
+@font-face{font-family:"Caveat";src:url("/*FONTS*//Caveat.ttf");font-weight:400 700}
 html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}
 .layer{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden}
 .g{position:absolute;left:0;width:1080px;text-align:center;white-space:nowrap}
@@ -80,8 +81,38 @@ html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hi
 .eye{position:absolute;width:88px;height:32px;margin:-16px 0 0 -44px;border-radius:50%;
   background:radial-gradient(ellipse at 50% 50%,#FFE9CF 0,#FFB170 30%,ORANGE 68%,#C9582B 100%);
   box-shadow:0 0 18px 6px rgba(255,150,80,.85),0 0 60px 22px rgba(224,112,63,.45)}
+/* editorial set (reference 2): free-placed words, colour walls, glow card, doodles, handwriting, prompt bar */
+.at{position:absolute;white-space:nowrap;line-height:1}
+.fill{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden}
+.halo{position:absolute;border-radius:50%}
+.wall .wl{position:absolute;left:0;top:0;white-space:nowrap;font-family:"Oswald";font-weight:700;text-transform:uppercase;line-height:1;transform-origin:0 0}
+.card{display:flex;flex-direction:column;justify-content:center;align-items:center}
+.card .gl{font-family:"Oswald";font-weight:700;text-transform:uppercase;line-height:1.02;white-space:nowrap;filter:blur(1.1px)}
+.doodle{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:visible}
+.doodle path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.boil{filter:url(#boil)}
+.hand{position:absolute;font-family:"Caveat";font-weight:700;line-height:.82;white-space:nowrap;transform-origin:0 50%}
+.hand .ch{display:inline-block}
+.blocks{position:absolute;left:0;top:0}
+.blocks i{position:absolute}
+.meta{position:absolute;font:600 22px/1.3 "Inter";color:#fff;opacity:.86;letter-spacing:.01em;text-shadow:0 1px 4px rgba(0,0,0,.6)}
+.meta.tl{left:56px;top:150px}.meta.tr{right:56px;top:150px;text-align:right}
+.meta.bl{left:56px;top:1390px}.meta.br{right:56px;top:1390px;text-align:right}
+.prompt{position:absolute;box-sizing:border-box;padding:34px 40px 26px;border-radius:40px;background:rgba(28,28,32,.84);
+  border:2px solid rgba(255,255,255,.16);box-shadow:0 24px 70px rgba(0,0,0,.55);transform-origin:50% 100%}
+.prompt .pt{font:500 46px/1.3 "Inter";color:#fff;min-height:120px;white-space:normal;text-align:left;position:relative}
+.prompt .cur{display:inline-block;width:4px;height:50px;background:#fff;vertical-align:-8px;margin-left:3px}
+.prompt .pb{display:flex;align-items:center;gap:20px;margin-top:22px;font:600 30px "Inter";color:rgba(255,255,255,.62)}
+.prompt .pb b{font:400 46px "Inter";color:rgba(255,255,255,.8);line-height:1}
+.prompt .chipm{background:rgba(255,255,255,.14);color:#fff;border-radius:14px;padding:6px 18px 8px}
+.prompt .sp{flex:1}
+.prompt .bars{display:inline-flex;gap:5px;align-items:center;height:36px}
+.prompt .bars i{width:5px;border-radius:3px;background:rgba(255,255,255,.75);height:14px}
 </style></head>
 <body>
+<svg width="0" height="0" style="position:absolute"><defs><filter id="boil" x="-5%" y="-5%" width="110%" height="110%">
+ <feTurbulence id="boilT" type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="1" result="n"/>
+ <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/></filter></defs></svg>
 <div id="back" class="layer"><!--BACK--></div>
 <div id="front" class="layer"><!--FRONT--></div>
 <script>
@@ -106,17 +137,30 @@ function fit() {
     el.style.top = (capTop - (base - capH)) + 'px';
     BIG.push({text: el.textContent, fin: +el.dataset.in, fout: +el.dataset.out, capTop, capH, fs, w: r.width});
   }
+  for (const el of document.querySelectorAll('.fitw')) {       // a line fitted to data-w (glow card)
+    el.style.display = 'inline-block'; el.style.fontSize = '200px';
+    el.style.fontSize = (200 * (+el.dataset.w) / el.getBoundingClientRect().width) + 'px';
+  }
+  for (const el of document.querySelectorAll('.wl')) {         // wall capitals: stretched to data-w x data-h, cap top at data-y
+    const fs = 300; el.style.fontSize = fs + 'px';
+    cv.font = `700 ${fs}px Oswald`;
+    const m = cv.measureText('НЕ'), capH = m.actualBoundingBoxAscent, asc = m.fontBoundingBoxAscent, desc = m.fontBoundingBoxDescent;
+    const base = (fs - (asc + desc)) / 2 + asc, wv = el.getBoundingClientRect().width;
+    const sx = (+el.dataset.w) / wv, sy = (+el.dataset.h) / capH;
+    el.style.transform = `translate(${+el.dataset.x}px, ${(+el.dataset.y) - (base - capH) * sy}px) scale(${sx}, ${sy})`;
+  }
 }
 window.ready = document.fonts.ready.then(async () => {
-  await Promise.all(['800 72px Inter', 'italic 700 72px "Playfair Display"', '700 72px Oswald', '600 25px "JetBrains Mono"'].map(f => document.fonts.load(f, 'Жж')));
+  await Promise.all(['800 72px Inter', 'italic 700 72px "Playfair Display"', '700 72px Oswald', '600 25px "JetBrains Mono"', '700 72px Caveat'].map(f => document.fonts.load(f, 'Жж')));
   fit();
   els = [...document.querySelectorAll('.a')];
-  for (const p of document.querySelectorAll('.rib path, .line path.d')) { p.dataset.len = p.getTotalLength(); p.style.strokeDasharray = p.dataset.len; }
+  for (const p of document.querySelectorAll('.rib path, .line path.d, .doodle path.d')) { p.dataset.len = p.getTotalLength(); p.style.strokeDasharray = p.dataset.len; }
   return true;
 });
 window.seek = (f, layer) => {
   document.getElementById('back').style.display = layer === 'back' ? 'block' : 'none';
   document.getElementById('front').style.display = layer === 'front' ? 'block' : 'none';
+  document.getElementById('boilT').setAttribute('seed', 1 + Math.floor(f / 3) % 7);     // hand-drawn marks «boil» every 3 frames
   let n = 0;
   for (const el of els) {
     const fin = +el.dataset.in, fout = el.dataset.out !== undefined ? +el.dataset.out : 1e9;
@@ -151,6 +195,19 @@ window.seek = (f, layer) => {
       cur.style.position = 'absolute'; cur.style.top = (bar ? 36 : 30) + 'px'; cur.style.marginLeft = '0';
       cur.style.left = (ch[0].getBoundingClientRect().left - el.getBoundingClientRect().left + wv + 8) + 'px';
       if (bar) { const k = Math.min(1, (d + 1) / 6), s = k < .6 ? .8 + .25 * eo(k / .6) : 1.05 - .05 * eo((k - .6) / .4); el.style.transform = `translateX(-50%) scale(${s})`; }
+    } else if (fx === 'write') {             // handwriting: letters appear one by one, each with a small pop
+      const ch = el.querySelectorAll('.ch'), per = (+el.dataset.dur) / ch.length;
+      ch.forEach((c, i) => { const k = (d + 1 - i * per) / 2; c.style.visibility = k > 0 ? 'inherit' : 'hidden'; c.style.transform = `scale(${k >= 1 ? 1 : 1.25})`; });
+    } else if (fx === 'blocks') {            // glitch rectangles flicker: a different subset every 2 frames
+      [...el.children].forEach((c, i) => { c.style.visibility = ((Math.floor(f / 2) * 7 + i * 13) % 5) < 2 ? 'inherit' : 'hidden'; });
+    } else if (fx === 'wall') {              // the wall slams in a bit oversized
+      el.style.transform = `scale(${1.1 - .1 * eo((d + 1) / 5)})`;
+    } else if (fx === 'prompt') {            // glass input bar rises, the prompt is typed
+      const k = eo((d + 1) / 5); el.style.transform = `translateY(${(1 - k) * 60}px) scale(${.96 + .04 * k})`; el.style.opacity = k;
+      const ch = el.querySelectorAll('.ch'), shown = Math.min(ch.length, Math.floor((d - 3) / (+el.dataset.dur) * ch.length));
+      ch.forEach((c, i) => c.style.display = i < shown ? 'inline' : 'none');
+      el.querySelector('.cur').style.visibility = (shown < ch.length || Math.floor(d / 8) % 2 === 0) ? 'inherit' : 'hidden';
+      el.querySelectorAll('.bars i').forEach((b, i) => b.style.height = (10 + 22 * Math.abs(Math.sin(d / 2.3 + i * 1.3))) + 'px');
     } else if (fx === 'chip') {
       const on = f >= +el.dataset.on, k = on ? Math.min(1, (f - (+el.dataset.on) + 1) / 5) : 0;
       el.classList.toggle('on', on);

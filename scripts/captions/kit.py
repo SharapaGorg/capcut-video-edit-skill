@@ -1,6 +1,6 @@
 """Layout kit for the captions layer. A reel's `layout.py` builds a Layout out of these blocks; `build()` writes
 gfx.html (two layers: back = behind the person, front = on top) and sfx_events.json into the work dir.
-All times are FRAMES of the 30 fps base render. Catalogue with pictures of use: references/techniques.md"""
+All times are FRAMES of the 30 fps base render. Catalogue with pictures of use: references/captions/techniques.md"""
 import json, subprocess
 from pathlib import Path
 import numpy as np
@@ -8,6 +8,7 @@ import numpy as np
 HERE = Path(__file__).parent
 FPS, W, H = 30, 1080, 1920
 CREAM, ORANGE, INK = "#F5EFE4", "#E0703F", "#15120F"
+RED = "#D5121B"
 
 
 class Layout:
@@ -21,6 +22,7 @@ class Layout:
         self.cuts = json.load(open(self.wd / "cuts.json"))["cuts"]
         self.back, self.front, self.ev = [], [], []
         self.sil, self.FACE, self.EYES, self.SEAMY = [], {}, {}, {}
+        self.rims, self.flashes = [], []
         self.cream, self.orange, self.ink = CREAM, ORANGE, INK
         self._uid = 0
         self.music_open = None                         # frame where the muffled music opens up (default: the first cut)
@@ -160,6 +162,132 @@ class Layout:
         return (f'<svg class="arrow a" data-in="{f}" data-out="{f_out}" data-fx="bob" viewBox="0 0 60 80" style="width:{size * .75:.0f}px;height:{size}px">'
                 f'<path{rot} d="M30 6 V66 M8 44 L30 70 L52 44" fill="none" stroke="{self.orange}" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
+    # ───── editorial set (reference 2, «красный монтаж»): free-placed words, colour walls, glow cards, doodles, handwriting
+    def theme(self, name):
+        """accent colour of the whole reel: "orange" (default, the brand) | "red" (reference 2)"""
+        self.orange = {"orange": ORANGE, "red": RED}[name]
+
+    def at(self, layer, html, x, y, f_out=None, cls="", rot=0, ry=0, align="left", style=""):
+        """free-placed line: html made of w() (give every word its font-size in style). (x, y) — left top corner; align "center" /
+        "right" — x is the centre / the right edge. rot — tilt in degrees, ry — turn in perspective (words on a wall or a screen)."""
+        tx = {"left": "0", "center": "-50%", "right": "-100%"}[align]
+        org = {"left": "0 50%", "center": "50% 50%", "right": "100% 50%"}[align]
+        if f_out is not None:
+            html = html.replace('data-fx=', f'data-out="{f_out}" data-fx=')
+        tf = f"translateX({tx})" + (f" perspective(1100px) rotateY({ry}deg)" if ry else "") + (f" rotate({rot}deg)" if rot else "")
+        layer.append(f'<div class="at {cls}" style="left:{x}px;top:{y}px;transform:{tf};transform-origin:{org};{style}">{html}</div>')
+
+    def stairs(self, layer, words, x, y, f_out, size=84, grow=1.0, dx=46, accent=(), cls="sans", align="left"):
+        """words step down a diagonal, one word a line: [(text, frame), ...]. dx — shift of every next word (negative — to the left),
+        grow — every next word this many times bigger (1.25: «and I'll send it to YOU.»), accent — indexes in the accent colour"""
+        s, cy = size, y
+        for i, (t, f) in enumerate(words):
+            self.at(layer, self.w(t, f, cls + (" acc" if i in accent else ""), style=f"font-size:{s:.0f}px;margin:0"), x + i * dx, round(cy), f_out, align=align)
+            cy += s * 0.96
+            s *= grow
+
+    def fill(self, layer, f, f_out, color, halo=None):
+        """flat colour over the whole frame. In self.back: the room is replaced and the person stays (cut-out on a colour); together
+        with L.silhouette — a black figure on this colour. halo=(cx, cy, r, color): a glowing disc behind the head.
+        In self.front: a card over everything (put its text after it)."""
+        h = ""
+        if halo:
+            cx, cy, r, c = halo
+            h = f'<i class="halo" style="left:{cx - r}px;top:{cy - r}px;width:{2 * r}px;height:{2 * r}px;background:radial-gradient(circle,{c} 0,{c} 58%,transparent 72%)"></i>'
+        el = f'<div class="fill a" data-in="{f}" data-out="{f_out}" data-fx="cut" style="background:{color}">{h}</div>'
+        layer.insert(0, el) if layer is self.back else layer.append(el)
+
+    def wall(self, lines, f, f_out, bg=None, color=None, top=380, height=1100, pad=36):
+        """the room turns into a colour wall with a word in tall condensed capitals from edge to edge; the person (or the object the
+        matte keeps) stays in front. lines: ["WORK", "FLOW"] — every line is stretched to the full width, together they take `height`."""
+        bg, color = bg or self.orange, color or self.cream
+        lh = height / len(lines)
+        body = "".join(f'<span class="wl" data-w="{W - 2 * pad}" data-h="{lh * .9:.0f}" data-x="{pad}" data-y="{top + i * lh:.0f}">{t}</span>' for i, t in enumerate(lines))
+        self.back.insert(0, f'<div class="fill wall a" data-in="{f}" data-out="{f_out}" data-fx="wall" style="background:{bg};color:{color}">{body}</div>')
+
+    def glowcard(self, f, f_out, lines, width=940, bg="#060606", color=None):
+        """black card with glowing condensed capitals that build word by word («AND IT'S / INSANE»). lines: [[(text, frame), ...], ...];
+        every line is fitted to `width`. One card a reel, 0.8–1.2 s, on the punch line."""
+        color = color or self.orange
+        body = "".join('<div class="fitw gl" data-w="%d">%s</div>' % (width, "".join(
+            f'<span class="w a" data-in="{wf}" data-out="{f_out}" data-fx="pop" style="margin:0 .08em">{t}</span>' for t, wf in ln)) for ln in lines)
+        self.front.append(f'<div class="fill card a" data-in="{f}" data-out="{f_out}" data-fx="cut" style="background:{bg};color:{color};'
+                          f'text-shadow:0 0 14px {color},0 0 46px {color},0 0 120px {color}">{body}</div>')
+
+    def scribble(self, layer, kind, f, f_out, box, color=None, width=9, dur=8, seed=1, boil=True):
+        """hand-drawn mark that draws itself over `dur` frames and keeps «boiling». kind: "circle" (box = x, y, w, h — around a face or
+        a thing), "box" (rough frame), "underline" (box = x, y, w, wave height), "arrow" (box = x0, y0, x1, y1 — from, to), "cross"."""
+        import math, random
+        r = random.Random(seed)
+        j = lambda v, a: v + r.uniform(-a, a)
+        if kind == "circle":
+            x, y, w_, h = box; cx, cy = x + w_ / 2, y + h / 2
+            a0 = r.uniform(0, 6.28)
+            pts = [(cx + math.cos(a0 + t / 60 * 6.283) * w_ / 2 * (1 + .07 * math.sin(t / 27) + r.uniform(-.006, .006)),     # 1.8 turns, 6° a step
+                    cy + math.sin(a0 + t / 60 * 6.283) * h / 2 * (1 + .07 * math.cos(t / 21) + r.uniform(-.006, .006))) for t in range(0, 108)]
+        elif kind == "box":
+            x, y, w_, h = box; c = [(x, y), (x + w_, y), (x + w_, y + h), (x, y + h)]; a = min(w_, h) * .035; pts = []
+            for k in range(9):                              # two passes and a bit: the lines overshoot the corners
+                px, py = c[k % 4]; qx, qy = c[(k + 1) % 4]; ex, ey = (qx - px) * .06, (qy - py) * .06
+                pts += [(j(px - ex, a), j(py - ey, a)), (j(qx + ex, a), j(qy + ey, a))]
+        elif kind == "underline":
+            x, y, w_, h = box
+            pts = [(x + w_ * t / 12, y + (h if t % 2 else -h) * .5 + r.uniform(-3, 3)) for t in range(13)] + [(x + w_ * t / 6 + 20, y + h * 1.6 + r.uniform(-4, 4)) for t in range(6, -1, -1)]
+        elif kind == "cross":
+            x, y, w_, h = box
+            pts = [(j(x, 8), j(y, 8)), (j(x + w_, 8), j(y + h, 8)), (j(x + w_ * .5, 8), j(y + h * .5, 8)), (j(x + w_, 8), j(y, 8)), (j(x, 8), j(y + h, 8))]
+        elif kind == "arrow":
+            x0, y0, x1, y1 = box; dx, dy = x1 - x0, y1 - y0; ln = math.hypot(dx, dy); nx, ny = -dy / ln, dx / ln; bulge = ln * .18
+            pts = [(x0 + dx * t / 10 + nx * bulge * math.sin(t / 10 * math.pi) + r.uniform(-3, 3), y0 + dy * t / 10 + ny * bulge * math.sin(t / 10 * math.pi) + r.uniform(-3, 3)) for t in range(11)]
+            ax, ay = pts[-1][0] - pts[-3][0], pts[-1][1] - pts[-3][1]; al = math.hypot(ax, ay); ax, ay = ax / al, ay / al; hl = min(90, ln * .28)
+            barb = lambda s: (x1 - ax * hl + s * -ay * hl * .55, y1 - ay * hl + s * ax * hl * .55)
+            pts += [barb(1), (x1, y1), barb(-1)]
+        else:
+            raise ValueError(kind)
+        d = "M " + " L ".join(f"{a:.0f} {b:.0f}" for a, b in pts)
+        layer.append(f'<svg class="doodle a" data-in="{f}" data-out="{f_out}" data-fx="draw" data-dur="{dur}" viewBox="0 0 1080 1920">'
+                     f'<path class="d{" boil" if boil else ""}" style="stroke:{color or self.orange};stroke-width:{width}" d="{d}"/></svg>')
+
+    def hand(self, layer, text, f, f_out, x, y, size=170, color=None, rot=-5, dur=7, align="left"):
+        """handwritten marker text (Caveat) written letter by letter over `dur` frames; "\\n" — next line. For the word the speaker
+        stresses as personal («your style», «мой», «сам») or a note next to a scribble; not for regular captions."""
+        tx = {"left": "0", "center": "-50%", "right": "-100%"}[align]
+        body = "".join('<div>' + "".join(f'<span class="ch">{c if c != " " else "&nbsp;"}</span>' for c in ln) + '</div>' for ln in text.split("\n"))
+        layer.append(f'<div class="hand boil a" data-in="{f}" data-out="{f_out}" data-fx="write" data-dur="{dur}" '
+                     f'style="left:{x}px;top:{y}px;font-size:{size}px;color:{color or self.orange};text-align:{align};transform:translateX({tx}) rotate({rot}deg)">{body}</div>')
+
+    def blocks(self, f, f_out, n=7, seed=1, layer=None):
+        """small black / white / accent rectangles that flicker for a few frames (glitch on the very first frames or on a hard cut)"""
+        import random
+        r = random.Random(seed); cols = ["#000", "#000", "#fff", self.orange]
+        body = "".join(f'<i style="left:{r.randint(40, 900)}px;top:{r.randint(200, 1500)}px;width:{r.choice([60, 120, 220, 380])}px;height:{r.choice([24, 40, 70, 110])}px;background:{r.choice(cols)}"></i>' for _ in range(n))
+        (self.front if layer is None else layer).append(f'<div class="blocks a" data-in="{f}" data-out="{f_out}" data-fx="blocks">{body}</div>')
+
+    def meta(self, f, f_out, tl="", tr="", bl="", br=""):
+        """tiny corner labels that stay for the whole reel or a chapter («ITERATION 001», the thesis in two lines); "\\n" — line break"""
+        for pos, t in (("tl", tl), ("tr", tr), ("bl", bl), ("br", br)):
+            if t:
+                self.front.append(f'<div class="meta {pos} a" data-in="{f}" data-out="{f_out}" data-fx="cut">{t.replace(chr(10), "<br>")}</div>')
+
+    def prompt(self, text, f, f_out, y=1250, dur=30, mode="Chat", model="AI", width=960):
+        """glass chat-input bar with a prompt typed over `dur` frames — «пишу промт», «спросил у нейросети», «сказал ИИ».
+        Sections without a face or the lower part of a wide shot; it must not cover hands or the screen the person points at."""
+        chars = "".join(f'<span class="ch">{c}</span>' if c != " " else " " for c in text)
+        self.front.append(f'<div class="prompt a" data-in="{f}" data-out="{f_out}" data-fx="prompt" data-dur="{dur}" style="top:{y}px;left:{(W - width) // 2}px;width:{width}px">'
+                          f'<div class="pt">{chars}<i class="cur"></i></div><div class="pb"><b>+</b><span class="chipm">{mode}</span><span class="sp"></span><span class="mdl">{model}</span>'
+                          '<span class="bars"><i></i><i></i><i></i><i></i></span></div></div>')
+
+    def rim(self, f, f_out, color=None, width=7):
+        """outline around the person (matte edge) in the accent colour — the speaker is «selected» like an object: on the product
+        name or the offer. Wide and medium shots; needs a clean matte (look at a still)."""
+        c = (color or self.orange).lstrip("#")
+        self.rims.append([f, f_out, [int(c[i:i + 2], 16) for i in (0, 2, 4)], width])
+
+    def flash(self, f, n=2, kind="invert"):
+        """the whole frame flashes for n frames on a hard cut: "invert" (negative), "white", "duo" (two-tone poster in the accent colour)"""
+        c = self.orange.lstrip("#")
+        self.flashes.append([f, f + n, kind, [int(c[i:i + 2], 16) for i in (0, 2, 4)]])
+
     # ───── tracking: face HUD, silhouette, eyes
     def track(self, f0, f1):
         """face boxes and eye centres for frames [f0, f1) of the base (Haar, smoothed); cached in the work dir"""
@@ -264,7 +392,7 @@ class Layout:
 
     def build(self):
         html = (HERE / "template.html").read_text(encoding="utf8")
-        data = f"const FACE={json.dumps(self.FACE)};const EYES={json.dumps(self.EYES)};const SIL={json.dumps(self.sil)};const SEAMY={json.dumps(self.SEAMY)};"
+        data = f"const FACE={json.dumps(self.FACE)};const EYES={json.dumps(self.EYES)};const SIL={json.dumps(self.sil)};const SEAMY={json.dumps(self.SEAMY)};const RIM={json.dumps(self.rims)};const FLASH={json.dumps(self.flashes)};"
         html = (html.replace("/*FONTS*/", (HERE.parent.parent / "assets" / "captions" / "fonts").as_uri())
                 .replace("<!--BACK-->", "\n".join(self.back)).replace("<!--FRONT-->", "\n".join(self.front))
                 .replace("/*DATA*/", data).replace("CREAM", self.cream).replace("ORANGE", self.orange).replace("INK", self.ink))

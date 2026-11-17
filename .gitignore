@@ -2,3 +2,4 @@ __pycache__/
 .pytest_cache/
 *.bak_*
 assets/captions/local.json
+assets/examples/captions/local/
