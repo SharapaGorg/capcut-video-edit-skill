@@ -164,8 +164,9 @@ class Layout:
 
     # ───── editorial set (reference 2, «красный монтаж»): free-placed words, colour walls, glow cards, doodles, handwriting
     def theme(self, name):
-        """accent colour of the whole reel: "orange" (default, the brand) | "red" (reference 2)"""
-        self.orange = {"orange": ORANGE, "red": RED}[name]
+        """accent colour of the whole reel: "orange" (default, the brand) | "red" (reference 2) | "violet" | "blue" | any "#RRGGBB"
+        (take it from the footage: the colour of the interface or the light in the frame, so the accent belongs to the picture)"""
+        self.orange = {"orange": ORANGE, "red": RED, "violet": "#8B5CF6", "blue": "#3B82F6"}.get(name, name)
 
     def at(self, layer, html, x, y, f_out=None, cls="", rot=0, ry=0, align="left", style=""):
         """free-placed line: html made of w() (give every word its font-size in style). (x, y) — left top corner; align "center" /
@@ -395,7 +396,8 @@ class Layout:
         data = f"const FACE={json.dumps(self.FACE)};const EYES={json.dumps(self.EYES)};const SIL={json.dumps(self.sil)};const SEAMY={json.dumps(self.SEAMY)};const RIM={json.dumps(self.rims)};const FLASH={json.dumps(self.flashes)};"
         html = (html.replace("/*FONTS*/", (HERE.parent.parent / "assets" / "captions" / "fonts").as_uri())
                 .replace("<!--BACK-->", "\n".join(self.back)).replace("<!--FRONT-->", "\n".join(self.front))
-                .replace("/*DATA*/", data).replace("CREAM", self.cream).replace("ORANGE", self.orange).replace("INK", self.ink))
+                .replace("/*DATA*/", data).replace("224,112,63", ",".join(str(int(self.orange[i:i + 2], 16)) for i in (1, 3, 5)))     # glows follow the accent
+                .replace("CREAM", self.cream).replace("ORANGE", self.orange).replace("INK", self.ink))
         (self.wd / "gfx.html").write_text(html, encoding="utf8")
         mo = self.music_open if self.music_open is not None else (self.cuts[0] if self.cuts else 0)
         json.dump(dict(music_open=round(mo / FPS, 4), sil=self.sil, events=[[k, round(f / FPS, 4), db] for k, f, db in self.ev]), open(self.wd / "sfx_events.json", "w"))
