@@ -1,0 +1,231 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:"Inter";src:url("/*FONTS*//Inter.ttf");font-weight:100 900}
+@font-face{font-family:"Playfair Display";src:url("/*FONTS*//Playfair-Italic.ttf");font-style:italic;font-weight:400 900}
+@font-face{font-family:"Oswald";src:url("/*FONTS*//Oswald.ttf");font-weight:200 700}
+@font-face{font-family:"JetBrains Mono";src:url("/*FONTS*//JetBrainsMono.ttf");font-weight:100 800}
+html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}
+.layer{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden}
+.g{position:absolute;left:0;width:1080px;text-align:center;white-space:nowrap}
+.ln{display:block}
+.w{display:inline-block;margin:0 .12em}
+.sans{font-family:"Inter";font-weight:800;font-size:92px;letter-spacing:-.02em;color:#fff;
+  text-shadow:0 4px 18px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.55)}
+.serif{font-family:"Playfair Display";font-style:italic;font-weight:700;letter-spacing:-.01em;color:CREAM;
+  text-shadow:0 5px 22px rgba(0,0,0,.5),0 1px 3px rgba(0,0,0,.5)}
+.acc{color:ORANGE !important}
+.ink{color:INK !important;text-shadow:none !important}
+.big{position:absolute;left:0;top:0;white-space:nowrap;font-family:"Oswald";font-weight:700;text-transform:uppercase;line-height:1;
+  color:#fff;letter-spacing:.005em;text-shadow:0 8px 34px rgba(0,0,0,.45),0 2px 5px rgba(0,0,0,.35)}
+.clip{position:absolute;left:0;width:1080px;overflow:hidden}
+.seam{font-size:60px}
+.bm{display:inline-block;width:58px;height:78px;vertical-align:-12px;margin-left:14px;filter:drop-shadow(0 6px 16px rgba(0,0,0,.5))}
+.seam .w{margin:0 .14em}
+/* filter chip */
+.chip{display:inline-flex;align-items:center;gap:22px;padding:26px 58px 30px 46px;border:5px solid CREAM;border-radius:999px;
+  box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.chip .w{font-size:92px;margin:0;text-shadow:none}
+.chip .dot{width:44px;height:44px;border-radius:50%;border:5px solid CREAM;box-sizing:border-box}
+.chip.on{background:ORANGE;border-color:ORANGE}
+.chip.on .dot{background:#fff;border-color:#fff}
+.gh{opacity:.16}
+/* strike / underline */
+.strikebox{position:relative;display:inline-block}
+.strike{position:absolute;left:-2%;right:-2%;top:56%;height:10px;border-radius:6px;background:ORANGE;transform-origin:0 50%}
+.uline{position:absolute;left:150px;width:780px;height:8px;border-radius:5px;background:ORANGE;transform-origin:0 50%}
+/* url */
+.url{font-family:"Inter";font-weight:800;font-size:142px;letter-spacing:-.035em;color:CREAM}
+.url .ch{display:inline-block}
+.url .cur{display:inline-block;width:14px;height:124px;margin-left:10px;background:ORANGE;vertical-align:-14px}
+/* ribbon */
+.rib{position:absolute;left:0;top:0;width:1080px;height:1920px}
+.rib path{fill:none;stroke:url(#rg);stroke-width:62;stroke-linecap:round;filter:drop-shadow(0 10px 14px rgba(60,25,5,.28))}
+/* face hud */
+#hud,.hud{position:absolute;left:0;top:0}
+.hud .c{position:absolute;width:54px;height:54px;border:0 solid #fff;filter:drop-shadow(0 0 4px rgba(0,0,0,.6))}
+.hud .tl{left:0;top:0;border-left-width:5px;border-top-width:5px}
+.hud .tr{right:0;top:0;border-right-width:5px;border-top-width:5px}
+.hud .bl{left:0;bottom:0;border-left-width:5px;border-bottom-width:5px}
+.hud .br{right:0;bottom:0;border-right-width:5px;border-bottom-width:5px}
+.hud .e{position:absolute;font:500 30px "JetBrains Mono";color:#fff;transform:translate(-50%,-50%);text-shadow:0 0 4px rgba(0,0,0,.7)}
+.hud .lab{position:absolute;left:0;bottom:calc(100% + 14px);font:600 28px/1.35 "JetBrains Mono";color:#fff;white-space:nowrap;
+  text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.hud .lab em{font-style:normal;color:#fff;background:ORANGE;padding:1px 10px 3px;border-radius:4px;text-shadow:none;display:inline-block;margin-top:6px}
+/* devil mode of the silhouette */
+.eye.evil{background:radial-gradient(ellipse at 50% 50%,#FFF3C4 0,#FFB03A 22%,#FF4A1C 58%,#B81200 100%);
+  box-shadow:0 0 22px 8px rgba(255,90,30,.95),0 0 90px 34px rgba(230,40,10,.6)}
+.devil{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:visible}
+.devil path{fill:INK}
+.hell{position:absolute;left:0;top:0;width:1080px;height:1920px;
+  background:radial-gradient(ellipse at 50% 46%,rgba(255,120,40,0) 30%,rgba(214,52,12,.5) 78%,rgba(120,10,0,.8) 100%)}
+.url.bar{left:50%;width:auto;transform-origin:50% 50%;background:INK;border-radius:44px;padding:6px 54px 22px;box-shadow:0 14px 44px rgba(0,0,0,.45)}
+/* full-screen scenes for sections without camera */
+.num{font-family:"Oswald";font-weight:700;line-height:1;color:ORANGE;letter-spacing:.01em;text-shadow:0 0 60px rgba(224,112,63,.45)}
+.dots{position:absolute;display:grid}
+.dots i{border-radius:50%;background:rgba(245,239,228,.13)}
+.dots i.on{background:CREAM}
+.dots i.hot{background:ORANGE;box-shadow:0 0 16px 2px rgba(224,112,63,.7)}
+.tiles{display:inline-flex;gap:14px;vertical-align:middle}
+.tile{font:800 44px "Inter";color:CREAM;border:4px solid rgba(245,239,228,.55);border-radius:24px;width:118px;height:136px;
+  display:flex;align-items:center;justify-content:center;box-sizing:border-box;text-shadow:none}
+.tile.hot{background:ORANGE;border-color:ORANGE;color:#fff;box-shadow:0 0 34px rgba(224,112,63,.6)}
+.tiles.dead .tile{opacity:.32}
+.line{position:absolute;left:0;top:0;width:1080px;height:1920px}
+.line path{fill:none;stroke:ORANGE;stroke-width:16;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 16px rgba(224,112,63,.65))}
+.line .axis{stroke:rgba(245,239,228,.35);stroke-width:4;filter:none}
+.clock{position:absolute}
+.arrow{display:inline-block;vertical-align:middle}
+/* glowing eyes on the silhouette */
+.eye{position:absolute;width:88px;height:32px;margin:-16px 0 0 -44px;border-radius:50%;
+  background:radial-gradient(ellipse at 50% 50%,#FFE9CF 0,#FFB170 30%,ORANGE 68%,#C9582B 100%);
+  box-shadow:0 0 18px 6px rgba(255,150,80,.85),0 0 60px 22px rgba(224,112,63,.45)}
+</style></head>
+<body>
+<div id="back" class="layer"><!--BACK--></div>
+<div id="front" class="layer"><!--FRONT--></div>
+<script>
+/*DATA*/
+const eo = k => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
+let els = [];
+function fit() {
+  // Oswald capitals: font-size from the target width, cap top from the head top
+  const cv = document.createElement('canvas').getContext('2d');
+  window.BIG = [];
+  for (const el of document.querySelectorAll('.fit')) {
+    el.style.fontSize = '200px';
+    const fs = 200 * (+el.dataset.w) / el.getBoundingClientRect().width;
+    el.style.fontSize = fs + 'px';
+    cv.font = `700 ${fs}px Oswald`;
+    const m = cv.measureText('НЕ');
+    const capH = m.actualBoundingBoxAscent, asc = m.fontBoundingBoxAscent, desc = m.fontBoundingBoxDescent;
+    const base = (fs - (asc + desc)) / 2 + asc;          // baseline inside the line-height:1 box
+    const capTop = el.dataset.top !== undefined ? +el.dataset.top : (+el.dataset.ht) - (+el.dataset.r) * capH;
+    const r = el.getBoundingClientRect();
+    el.style.left = ((+el.dataset.cx) - r.width / 2) + 'px';
+    el.style.top = (capTop - (base - capH)) + 'px';
+    BIG.push({text: el.textContent, fin: +el.dataset.in, fout: +el.dataset.out, capTop, capH, fs, w: r.width});
+  }
+}
+window.ready = document.fonts.ready.then(async () => {
+  await Promise.all(['800 72px Inter', 'italic 700 72px "Playfair Display"', '700 72px Oswald', '600 25px "JetBrains Mono"'].map(f => document.fonts.load(f, 'Жж')));
+  fit();
+  els = [...document.querySelectorAll('.a')];
+  for (const p of document.querySelectorAll('.rib path, .line path.d')) { p.dataset.len = p.getTotalLength(); p.style.strokeDasharray = p.dataset.len; }
+  return true;
+});
+window.seek = (f, layer) => {
+  document.getElementById('back').style.display = layer === 'back' ? 'block' : 'none';
+  document.getElementById('front').style.display = layer === 'front' ? 'block' : 'none';
+  let n = 0;
+  for (const el of els) {
+    const fin = +el.dataset.in, fout = el.dataset.out !== undefined ? +el.dataset.out : 1e9;
+    if (f < fin || f >= fout) { el.style.visibility = 'hidden'; continue; }
+    el.style.visibility = 'visible';
+    if (el.closest('#' + layer)) n++;
+    const d = f - fin, fx = el.dataset.fx;
+    if (fx === 'word') {                       // lands on its frame: 1/3 there on the first one
+      const k = eo((d + 1) / 3);
+      el.style.transform = `translateY(${(1 - k) * 26}px) scale(${.94 + .06 * k})`; el.style.opacity = k;
+    } else if (fx === 'pop') {                 // 80 % -> 105 % -> 100 % over 6 frames
+      const k = Math.min(1, (d + 1) / 6);
+      const s = k < .6 ? .8 + .25 * eo(k / .6) : 1.05 - .05 * eo((k - .6) / .4);
+      // after the pop the word keeps drifting 3 % closer: the layers read as depth, not as a sticker
+      const life = (el.dataset.out !== undefined ? fout - fin : 60), dr = el.classList.contains('big') ? 1 + .035 * d / life : 1;
+      el.style.transform = `scale(${s * dr})`; el.style.opacity = Math.min(1, (d + 1) / 2);
+    } else if (fx === 'seam') {
+      const rest = +el.dataset.rest, sy = SEAMY[f] !== undefined ? SEAMY[f] : rest;   // rides a sliding edge until it stops at `rest`
+      el.style.top = ((+el.dataset.y) + Math.min(0, sy - rest)) + 'px';
+    } else if (fx === 'strike') {
+      el.style.transform = `scaleX(${eo((d + 1) / 6)})`;
+    } else if (fx === 'draw') {
+      const p = el.querySelector('path.d') || el.querySelector('path');
+      p.style.strokeDashoffset = (+p.dataset.len) * (1 - eo((d + 1) / (+el.dataset.dur)));
+    } else if (fx === 'type') {
+      const ch = el.querySelectorAll('.ch'), shown = Math.min(ch.length, Math.floor((d + 1) / (+el.dataset.dur) * ch.length));
+      ch.forEach((c, i) => c.style.visibility = i < shown ? 'inherit' : 'hidden');
+      const cur = el.querySelector('.cur');
+      cur.style.visibility = (shown < ch.length || Math.floor(d / 8) % 2 === 0) ? 'inherit' : 'hidden';
+      let wv = 0; ch.forEach((c, i) => { if (i < shown) wv += c.getBoundingClientRect().width; });
+      const bar = el.classList.contains('bar');
+      cur.style.position = 'absolute'; cur.style.top = (bar ? 36 : 30) + 'px'; cur.style.marginLeft = '0';
+      cur.style.left = (ch[0].getBoundingClientRect().left - el.getBoundingClientRect().left + wv + 8) + 'px';
+      if (bar) { const k = Math.min(1, (d + 1) / 6), s = k < .6 ? .8 + .25 * eo(k / .6) : 1.05 - .05 * eo((k - .6) / .4); el.style.transform = `translateX(-50%) scale(${s})`; }
+    } else if (fx === 'chip') {
+      const on = f >= +el.dataset.on, k = on ? Math.min(1, (f - (+el.dataset.on) + 1) / 5) : 0;
+      el.classList.toggle('on', on);
+      const s = on ? (k < .5 ? 1 - .07 * eo(k / .5) : .93 + .07 * eo((k - .5) / .5)) : .9 + .1 * eo((d + 1) / 4);
+      el.style.transform = `scale(${s})`; el.style.opacity = Math.min(1, (d + 1) / 2);
+    } else if (fx === 'scroll') {              // «листаем»: the column keeps scrolling up
+      const k = eo((d + 1) / 4);
+      el.style.transform = `translateY(${-184.8 + (1 - k) * 60 - d * 7.5}px)`; el.style.opacity = k;
+    } else if (fx === 'eyes') {              // open with a small overshoot, blink once
+      const ey = EYES[f];
+      if (!ey) { el.style.visibility = 'hidden'; continue; }
+      const ang = Math.atan2(ey[3] - ey[1], ey[2] - ey[0]) * 180 / Math.PI;
+      const k = Math.min(1, (d + 1) / 5);
+      let sy = k < .6 ? 1.25 * eo(k / .6) : 1.25 - .25 * eo((k - .6) / .4);
+      const bl = d - (+el.dataset.blink);
+      if (bl >= 0 && bl < 4) sy *= [.45, .08, .4, .85][bl];
+      let sc = Math.hypot(ey[2] - ey[0], ey[3] - ey[1]) / 250;        // eye size follows the face size (250 px between the eyes = close-up)
+      const evil = el.dataset.devil !== undefined;
+      if (evil) sc *= 1.45 + .12 * Math.sin(d * 2.1) + .08 * Math.sin(d * 5.3);   // bigger, flickering like fire
+      el.querySelectorAll('.eye').forEach((e, i) => {
+        e.style.left = ey[i * 2] + 'px'; e.style.top = ey[i * 2 + 1] + 'px';
+        const slant = evil ? (i ? -16 : 16) : 0;                       // inner corners down: an angry look
+        e.style.transform = `rotate(${ang + slant}deg) scale(${sc * (.9 + .1 * k)},${sc * Math.max(.05, sy)})`;
+      });
+    } else if (fx === 'count') {             // number runs up to data-to over data-dur frames, then a small punch
+      const dur = +el.dataset.dur, k = eo((d + 1) / dur);
+      el.firstChild.textContent = Math.round((+el.dataset.to) * k);
+      const p = d - dur; el.style.transform = `scale(${p >= 0 && p < 5 ? 1.08 - .08 * eo((p + 1) / 5) : .9 + .1 * Math.min(1, (d + 1) / 3)})`;
+      el.style.opacity = Math.min(1, (d + 1) / 2);
+    } else if (fx === 'dots') {              // grid fills dot by dot; from data-hot every n-th dot turns orange
+      const shown = (d + 1) * (+el.dataset.per), hot = el.dataset.hot !== undefined && f >= +el.dataset.hot, ev = +el.dataset.every;
+      [...el.children].forEach((c, i) => { c.className = i < shown ? (hot && i % ev === 0 ? 'hot' : 'on') : ''; });
+    } else if (fx === 'tiles') {             // tiles land one per frame; one turns orange at data-hot; all fade at data-dead
+      [...el.children].forEach((c, i) => {
+        const k = eo((d - i + 1) / 3);
+        c.style.opacity = k; c.style.transform = `translateY(${(1 - k) * 30}px)`;
+        c.classList.toggle('hot', el.dataset.hot !== undefined && i === +el.dataset.pick && f >= +el.dataset.hot);
+      });
+      el.classList.toggle('dead', el.dataset.dead !== undefined && f >= +el.dataset.dead);
+    } else if (fx === 'clock') {             // the hand spins
+      el.querySelector('.hand').setAttribute('transform', `rotate(${d * (+el.dataset.speed)} 100 100)`);
+      el.querySelector('.hand2').setAttribute('transform', `rotate(${d * (+el.dataset.speed) / 12} 100 100)`);
+      const k = Math.min(1, (d + 1) / 6), s = k < .6 ? .8 + .25 * eo(k / .6) : 1.05 - .05 * eo((k - .6) / .4);
+      el.style.transform = `scale(${s})`; el.style.opacity = Math.min(1, (d + 1) / 2);
+    } else if (fx === 'bob') {               // arrow nods where to look
+      el.style.transform = `translateY(${Math.sin(d / 3.2) * 16}px)`; el.style.opacity = Math.min(1, (d + 1) / 3);
+    } else if (fx === 'devil') {             // horns grow out of the head, the tail sways; both follow the tracked eyes
+      const ey = EYES[f];
+      if (!ey) { el.style.visibility = 'hidden'; continue; }
+      const cx = (ey[0] + ey[2]) / 2, cy = (ey[1] + ey[3]) / 2, dist = +el.dataset.dist;
+      const ang = Math.atan2(ey[3] - ey[1], ey[2] - ey[0]) * 180 / Math.PI, u = dist / 100 * (+el.dataset.size);
+      const k = Math.min(1, (d + 1) / 7), g = k < .7 ? 1.2 * eo(k / .7) : 1.2 - .2 * eo((k - .7) / .3);
+      el.querySelector('.horns').setAttribute('transform', `translate(${cx} ${cy}) rotate(${ang}) scale(${u} ${u * g})`);
+      const tail = el.querySelector('.tail');
+      if (tail) {
+        const tk = eo((d - 3) / 8), sway = Math.sin(d / 3.4) * 9;
+        tail.setAttribute('transform', `translate(${+el.dataset.tx} ${+el.dataset.ty}) rotate(${sway}) scale(${(+el.dataset.ts) * tk})`);
+      }
+    } else if (fx === 'hell') {              // red vignette pulses behind the silhouette
+      el.style.opacity = eo((d + 1) / 5) * (.72 + .28 * Math.sin(d / 2.2));
+    } else if (fx === 'hud') {
+      const b = FACE[f];
+      if (!b) { el.style.visibility = 'hidden'; continue; }
+      const k = eo((d + 1) / 5), pad = 26 + (1 - k) * 90;
+      const x = b[0] - pad, y = b[1] - pad, w = b[2] + 2 * pad, h = b[3] + 2 * pad;
+      el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px'; el.style.opacity = k;
+      const e1 = el.querySelector('.e1'), e2 = el.querySelector('.e2');
+      const ey = EYES[f];
+      if (ey) { e1.style.left = (ey[0] - x) + 'px'; e1.style.top = (ey[1] - y) + 'px'; e2.style.left = (ey[2] - x) + 'px'; e2.style.top = (ey[3] - y) + 'px'; }
+      else { e1.style.left = '31%'; e1.style.top = '42%'; e2.style.left = '69%'; e2.style.top = '42%'; }
+      const conf = (0.9 + 0.09 * Math.abs(Math.sin(f * 1.7))).toFixed(3);
+      el.querySelector('.h1').textContent = 'FACE ' + conf;
+      el.querySelector('.h2').textContent = 'X ' + String(Math.round(b[0] + b[2] / 2)).padStart(4, '0') + '  Y ' + String(Math.round(b[1] + b[3] / 2)).padStart(4, '0');
+    }
+  }
+  return n;
+};
+</script></body></html>

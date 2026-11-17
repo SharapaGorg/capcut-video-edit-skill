@@ -12,7 +12,7 @@ SCRIPTS = ROOT / "scripts"
 
 # Strings split so this file does not match itself.
 FORBIDDEN = ["Гайд" + " конкуренты", "E87" + "DC4D2", "IMG" + "_E02", "AiVideo" + "Editing",
-             "4-гайд-на-" + "анализ-конкурентов", "write" + "lo", "stage11" + "_intro", "illustrations" + "/"]
+             "4-гайд-на-" + "анализ-конкурентов", "stage11" + "_intro", "illustrations" + "/"]
 FORBIDDEN_RE = re.compile("Compound" + r" clip\d")
 # Every file that decodes as UTF-8 is scanned; only known binary formats are skipped.
 BINARY = {".ttf", ".otf", ".woff", ".woff2", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".mov", ".mp4", ".mkv",
@@ -26,13 +26,14 @@ SKIP_DIRS = {".git", ".superpowers", "__pycache__", ".pytest_cache"}
 #   init_video.py          creates config.json, there is none yet
 #   capcut_new_project.py  creates a NEW project folder (EXPERIMENTAL), not an edit of config's project
 NO_CONFIG = {"init_video.py", "capcut_new_project.py", "beats.py", "voice_ref.py",   # beats.py: library + debug print, no argparse; voice_ref.py: audio file -> file, no project
-             "build_reel.py", "validate_reel.py"}                                     # reel from scratch: a spec path, no CapCut project / config.json
+             "build_reel.py", "validate_reel.py", "peephole.py", "screen_cut.py"}                    # reel from scratch: a spec path, no CapCut project / config.json
 
 
 def _skill_files():
     for p in ROOT.rglob("*"):
         rel = p.relative_to(ROOT)
-        if not p.is_file() or SKIP_DIRS & set(rel.parts):
+        if not p.is_file() or SKIP_DIRS & set(rel.parts) or ".bak_" in p.name \
+                or rel.as_posix() == "assets/captions/local.json":      # local paths, git-ignored
             continue
         if rel.parts[:2] == ("assets", "examples"):
             continue

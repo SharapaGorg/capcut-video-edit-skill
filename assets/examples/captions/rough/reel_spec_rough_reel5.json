@@ -1,0 +1,112 @@
+{
+ "id": "rough_v2",
+ "out": "out/rough_v2.mp4",
+ "fps": 30,
+ "w": 1080,
+ "h": 1920,
+ "speed": 1.08,
+ "voice_dir": "../voice",
+ "camera_dir": "../camera",
+ "words": "transcript/words.json",
+ "audio_profile": "loud",
+ "no_captions": true,
+ "palette": {
+  "accent": "#D4683F",
+  "text": "#FFFFFF",
+  "cap_size": 60,
+  "cap_upper": true
+ },
+ "sections": [
+  {
+   "id": "hook1",
+   "voice": "hook1.m4a",
+   "v": [
+    23.4,
+    24.5
+   ],
+   "camera": "1.MOV",
+   "cam_offset": 12.6,
+   "script": "Ты нейрокреатор?"
+  },
+  {
+   "id": "hook2",
+   "voice": "hook2.m4a",
+   "v": [
+    36.35,
+    38.35
+   ],
+   "camera": "2.MOV",
+   "cam_offset": 14.516,
+   "script": "Сейчас покажу, где искать ИИ-тренды"
+  },
+  {
+   "id": "screen",
+   "voice": "заходим-нажимаем-на-фильтр.m4a",
+   "v": [
+    0.5,
+    7.8
+   ],
+   "camera": null,
+   "script": "Заходим, нажимаем на фильтр только ИИ и листаем, быстренько набираем себе понравившиеся в референсы и приступаем к работе",
+   "device": {
+    "frame": "<skill>/assets/devices/iphone13promax_graphite.png",
+    "model": "iphone13promax",
+    "at_word": "Заходим",
+    "x": 160,
+    "y": 748,
+    "w": 760,
+    "dist": 300,
+    "dur": 0.45
+   },
+   "fx": [
+    {
+     "kind": "grid_bg"
+    }
+   ],
+   "slide_down": {
+    "y": 960,
+    "dur": 0.5,
+    "dev_to_y": 1010
+   }
+  },
+  {
+   "id": "dates",
+   "voice": "можно-тут-что-то.m4a",
+   "v": [
+    24.9,
+    29.6
+   ],
+   "camera": "3.MOV",
+   "cam_offset": 3.518,
+   "script": "Можно тут и по датам смотреть и по цифрам, можно даже найти что-нибудь конкретное через поиск",
+   "cam_split": {
+    "h": 960,
+    "y": 0,
+    "cy": 0.3
+   }
+  },
+  {
+   "id": "link",
+   "voice": "делюсь-ссылкой-на-сайт.m4a",
+   "v": [
+    4.8,
+    7.35
+   ],
+   "camera": "4.MOV",
+   "cam_offset": 5.597,
+   "script": "Делюсь ссылкой на сайт даже без кодового слова",
+   "cam_letterbox": true
+  },
+  {
+   "id": "cta",
+   "voice": "CTA.m4a",
+   "v": [
+    11.0,
+    12.8
+   ],
+   "camera": "5.MOV",
+   "cam_offset": 4.443,
+   "script": "Сохраняй, чтобы не потерять"
+  }
+ ]
+}

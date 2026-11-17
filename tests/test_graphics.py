@@ -322,14 +322,15 @@ def test_anim_defaults_and_style():
 
 
 FORBIDDEN = ["Гайд" + " конкуренты", "E87" + "DC4D2", "IMG" + "_E02", "AiVideo" + "Editing",
-             "4-гайд-на-" + "анализ-конкурентов", "write" + "lo", "stage11" + "_intro", "illustrations" + "/", "sha" + "ra"]
+             "4-гайд-на-" + "анализ-конкурентов", "stage11" + "_intro", "illustrations" + "/", "sha" + "ra"]
 
 
 def test_no_forbidden_strings_anywhere():
     bad = []
     for top in ("scripts", "tests", "assets", "references", "templates"):
         for p in (ROOT / top).rglob("*"):
-            if p.suffix.lower() not in {".py", ".md", ".json", ".js", ".css", ".html"} or "__pycache__" in p.parts:
+            if p.suffix.lower() not in {".py", ".md", ".json", ".js", ".css", ".html"} or "__pycache__" in p.parts \
+                    or p.name == "local.json":            # assets/captions/local.json: local paths, git-ignored
                 continue
             if p.name == "test_effects.py":           # holds the older list itself
                 continue

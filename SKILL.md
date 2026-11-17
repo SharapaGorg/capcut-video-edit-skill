@@ -1,6 +1,6 @@
 ---
 name: video-edit
-description: Монтаж ролика — монтаж длинного YouTube-ролика в CapCut по этапам 0–10 (транскрипция, смысловая и техническая резка, сборка compound/кружок/голос, раскладка S/F, хук, цензура, зумы+SFX, HTML-графика, музыка, экспорт) и короткие версии из него (YouTube Shorts, Instagram Reels, TikTok). Применять, когда пользователь даёт папку исходников ролика (camera/screencasts/voice) и/или проект CapCut и просит смонтировать, продолжить этап, сделать шортсы/рилсы/тиктоки, графику, музыку, субтитры .srt, главы, проверить громкость. Триггеры: «смонтируй ролик», «новый ролик», «этап N», «CapCut», «шортсы», «рилсы», «тикток», «draft_content.json».
+description: Монтаж ролика — монтаж длинного YouTube-ролика в CapCut по этапам 0–10 (транскрипция, смысловая и техническая резка, сборка compound/кружок/голос, раскладка S/F, хук, цензура, зумы+SFX, HTML-графика, музыка, экспорт) и короткие версии из него (YouTube Shorts, Instagram Reels, TikTok). Применять, когда пользователь даёт папку исходников ролика (camera/screencasts/voice) и/или проект CapCut и просит смонтировать, продолжить этап, сделать шортсы/рилсы/тиктоки, графику, музыку, субтитры .srt, главы, проверить громкость. Также рилс с нуля из сырья и сценария (без CapCut) и стиль «слова за головой» поверх чернового рендера рилса: пословные субтитры, крупное слово за головой, силуэт, саунд-дизайн. Триггеры: «смонтируй ролик», «новый ролик», «этап N», «CapCut», «шортсы», «рилсы», «тикток», «draft_content.json», «смонтируй рилс», «как нейрокреатора», «субтитры за головой», «слова за головой», «в новом стиле».
 ---
 
 # Монтаж ролика (CapCut) + короткие версии
@@ -13,6 +13,8 @@ description: Монтаж ролика — монтаж длинного YouTube
 - Продолжение: «дальше», «этап N», правки по просмотру черновика/экспорта.
 - Короткие: шортсы, рилсы, тиктоки из готового ролика.
 - Рилс с нуля из сырья и сценария (микрофон m4a + камера MOV по кускам, без CapCut и без длинного ролика) — references/reel.md.
+- Рилс «слова за головой» (референс @viashaan): проход поверх готового чернового рендера рилса — пословные субтитры, крупное слово за головой, силуэт, рамка трекинга, саунд-дизайн. Папка рилса + «как нейрокреатора» / «в новом стиле» → references/captions.md. Черновика нет — сначала собрать его (references/captions/rough.md).
+- Описание (подпись) к рилсу — references/description.md.
 - Вне скилла: превью (thumbnail), загрузка на площадки.
 
 ## Вход
@@ -100,7 +102,9 @@ cwd = рабочая папка ролика (там `config.json`); скрип�
 | Shorts | references/shorts.md | `scripts/shorts/{build,build_render,voice_ref,cam_lut,rmap,scheme}.py` (scheme — полноэкранная схема «кто есть кто») |
 | Reels | references/reels.md | `scripts/shorts/build.py --reels` |
 | TikTok | references/tiktok.md | `scripts/shorts/build.py --tiktok` |
-| Рилс с нуля | references/reel.md | `scripts/reel/{build_reel,validate_reel}.py` (спека + whisper-слова → mp4; схема, UI-макеты, стикеры, мемы, музыка, −17.5 LUFS) |
+| Рилс с нуля | references/reel.md | `scripts/reel/{build_reel,validate_reel}.py` (спека + whisper-слова → mp4; схема, UI-макеты, стикеры, мемы, музыка, −17.5 LUFS), `scripts/reel/{footage,fx,screen_cut,peephole}.py` (полноэкранный футаж, эффекты секций, нарезка скринкаста, «глазок») |
+| Рилс «слова за головой» | references/captions.md; references/captions/style.md, references/captions/techniques.md, references/captions/sound.md, references/captions/feedback.md, references/captions/rough.md, references/captions/sources.md | `scripts/captions/run.py` (этапы prep / stills / render / audio), `scripts/captions/{kit,compose,audio,matte,heads,cuts,words,prep,extend}.py`; раскладка `<проект>/auto/captions/layout.py` |
+| Описание рилса | references/description.md | — |
 
 Общие правила — [references/rules.md](references/rules.md). Эталон монтажёра (звук/цвет/дизайн, профили `ref`) — [references/reference-style.md](references/reference-style.md). Проверки — [references/validation.md](references/validation.md). Формат CapCut и подводные камни — [references/capcut-format.md](references/capcut-format.md). Графика — [references/graphics.md](references/graphics.md).
-Шаблоны JSON CapCut — `assets/templates/`, шрифт — `assets/Unbounded-var.ttf`, образцы графики — `assets/examples/html/`, образец спеки — `assets/examples/specs/example.json`.
+Шаблоны JSON CapCut — `assets/templates/`, шрифт — `assets/Unbounded-var.ttf`, образцы графики — `assets/examples/html/`, образец спеки — `assets/examples/specs/example.json`. «Слова за головой»: шрифты, модель маски, музыка — `assets/captions/`, раскладки и раскадровки — `assets/examples/captions/`.
