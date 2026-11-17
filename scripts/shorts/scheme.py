@@ -127,6 +127,8 @@ def icon_html(icon: str, shape: str, base: Path | None, uid: str) -> str:
     return f'<img src="{p.resolve().as_uri()}" alt="">'
 
 
+ARC_GAP_R = 240   # icon .ic is 404 px (r 202) + glow
+
 # ---------------- html ----------------
 def layout(card: dict):
     """World positions of the nodes, camera keys [(tl, x, y)], arcs [(d, tl, dur)]."""
@@ -137,7 +139,7 @@ def layout(card: dict):
     arcs = []
     for a, b in zip(card['nodes'], card['nodes'][1:]):
         (x0, y0), (x1, y1) = pos[a['id']], pos[b['id']]
-        arcs.append((f'M{x0} {y0} Q{x1} {y0} {x1} {y1}', b['pan_at'] + st['arc_delay'], st['arc_dur']))
+        arcs.append((f'M{x0} {y0} Q{x1} {y0} {x1} {y1}', b['pan_at'] + st['arc_delay'], st['arc_dur'], (x0, y0), (x1, y1)))
     return pos, cam, arcs
 
 
@@ -192,10 +194,12 @@ def html_fragment(card: dict, tmap=None, icon_base: Path | None = None) -> str:
          '<div class="grid"></div>',
          f'<div class="world" data-cam=\'{json.dumps([[r(t), x, y] for t, x, y in cam])}\' data-pan="{st["pan"]}">',
          '<svg class="arcs" viewBox="-3000 -3000 6000 6000"><defs>']
-    for i, (d, t, dur) in enumerate(arcs):
-        o.append(f'<mask id="m{uid}_{i}"><path d="{d}" pathLength="1" stroke-dasharray="1" class="draw" data-t="{r(t)}" data-dur="{dur}"/></mask>')
+    for i, (d, t, dur, p0, p1) in enumerate(arcs):
+        # black discs at both ends: the dash stops at the icon's glow edge instead of running under the outline icon
+        cut = ''.join(f'<circle cx="{x}" cy="{y}" r="{ARC_GAP_R}" fill="#000"/>' for x, y in (p0, p1))
+        o.append(f'<mask id="m{uid}_{i}"><path d="{d}" pathLength="1" stroke-dasharray="1" class="draw" data-t="{r(t)}" data-dur="{dur}"/>{cut}</mask>')
     o.append('</defs>')
-    for i, (d, t, dur) in enumerate(arcs):
+    for i, (d, t, dur, *_) in enumerate(arcs):
         o.append(f'<path class="dash" d="{d}" mask="url(#m{uid}_{i})"/>')
     o.append('</svg>')
 

@@ -31,6 +31,7 @@ sys.path.insert(0, str(SCRIPTS / 'shorts'))
 sys.path.insert(0, str(SCRIPTS / 'stage10'))
 import cam_lut  # noqa: E402
 import footage  # noqa: E402
+import fx  # noqa: E402  (camera-less sections: grid_bg / connect / limits)
 import peephole  # noqa: E402  (full-screen motion-graphic sections: "footage")
 import scheme  # noqa: E402
 import voice_ref  # noqa: E402
@@ -55,6 +56,7 @@ ANGLES = {
     'arms':  dict(cap_y=440, cap_box=(0, W, 'center'), hook_y=330, memes=[(50, 250), (730, 250)], stickers=[(150, 1200), (930, 1200)],
                   images=[(760, 760)]),
     'desk':  dict(cap_y=440, cap_box=(600, 460, 'left'), hook_y=330, stickers=[(150, 480), (150, 700)], cta_y=1150),   # head centre-left, painting top centre: text on the wall right of the head above the sword
+    'broll': dict(cap_y=1330, cap_box=(0, W, 'center'), hook_y=200, stickers=[(150, 1500), (930, 1500)], images=[(W // 2 - 210, 300)]),   # laptop screen mid-frame: text in the lower third above the Reels strip
     'couch': dict(cap_y=400, cap_box=(430, 620, 'left'), hook_y=330, stickers=[(160, 1120), (920, 1120)], cta_y=1150),   # KURS above the Reels UI strip (bottom ~25 %)   # head top-left -> text right of it
 }
 ZOOM_IN, ZOOM_HOLD, ZOOM_OUT, ZOOM_SCALE = 0.2, 0.7, 0.3, 1.12
@@ -74,8 +76,8 @@ def esc(s): return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&g
 
 
 def apply_mode(spec, mode):
-    """Narrow the spec to the platform: block spec[mode] may list "sections" (ids kept, spec order) and "end" (card
-    text); "tiktok_channel" / "tiktok_thumbnail" at the top level or in the block. Returns the block."""
+    """Narrow the spec to the platform: block spec[mode] may list "sections" (ids kept, spec order), "overrides"
+    ({id: {key: value}} merged into the section, None drops the key — e.g. a shorter "v" for the teaser) and "end" (card text); "tiktok_channel" / "tiktok_thumbnail" at the top level or in the block. Returns the block."""
     blk = dict(spec.get(mode) or {})
     if blk.get('sections'):
         keep = list(blk['sections']); have = {s['id'] for s in spec['sections']}
@@ -85,6 +87,12 @@ def apply_mode(spec, mode):
         if spec.get('music_extra'): spec['music_extra'] = [m for m in spec['music_extra'] if m['section'] in keep]
         mi = spec.get('music_in')
         if isinstance(mi, str) and mi.startswith('after:') and mi[6:] not in keep: spec['music_in'] = 'after_hook'
+    for sid, ov in (blk.get('overrides') or {}).items():     # "overrides": {id: {v, scheme, ...}} — shallow merge, None removes the key
+        sec = next((s for s in spec['sections'] if s['id'] == sid), None)
+        if sec is None: raise SystemExit(f'{mode}: overrides — секции нет: {sid}')
+        for k, v in ov.items():
+            if v is None: sec.pop(k, None)
+            else: sec[k] = v
     for k in ('tiktok_channel', 'tiktok_thumbnail'):
         if k in spec and k not in blk: blk[k] = spec[k]
     return blk
@@ -94,6 +102,14 @@ def end_html(mode, blk, t, base):
     """End card over the dimmed last frame (markup = shorts/build.py html_end): TikTok -> YouTube thumbnail + channel;
     YouTube -> kicker / line from blk["end"] (defaults «ПОЛНОЕ ВИДЕО» / «В ПРОФИЛЕ ↑»)."""
     dim = f'<div class="dim" data-in="{t:.2f}" data-fx="fade" data-dist="0" data-dur="0.3"></div>'
+    e = blk.get('end') or {}
+    if e.get('style') == 'glitch':      # black card, glitch bursts (GLITCH_JS), lines[0] big white, lines[1] accent
+        ls = e.get('lines') or ['writelo.io']
+        def layers(cls, txt): return ''.join(f'<div class="{cls} {k}">{esc(txt)}</div>' for k in ('r', 'c', 'b'))
+        inner = f'<div class="gl-t">{layers("l", ls[0])}</div>'
+        if len(ls) > 1: inner += f'<div class="gl-s">{layers("l", ls[1])}</div>'
+        return (f'<div class="gl" data-in="{t:.2f}" data-fx="cut" data-t0="{t:.3f}"><div class="gl-wrap">{inner}</div>'
+                f'<div class="gl-scan"></div><div class="gl-bar"></div></div>')
     if mode == 'tiktok':
         ch = blk.get('tiktok_channel'); th = blk.get('tiktok_thumbnail'); img = ''
         if th:
@@ -107,7 +123,6 @@ def end_html(mode, blk, t, base):
         print('  ВНИМАНИЕ: tiktok_channel не задан — на карточке «ИЩИ ПО НАЗВАНИЮ ↑», имя канала не выдумывать')
         return (dim + f'<div class="end tiktok"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>ПОЛНОЕ ВИДЕО НА YOUTUBE</span>'
                 + img + f'<span class="plate" data-in="{t + 0.7:.2f}" data-fx="pop" data-dist="40"{ANIM}>ИЩИ ПО НАЗВАНИЮ ↑</span></div>')
-    e = blk.get('end') or {}
     return (dim + f'<div class="end"><span class="kicker" data-in="{t + 0.1:.2f}" data-fx="slide-left" data-dist="40"{ANIM}>{esc(e.get("kicker", "ПОЛНОЕ ВИДЕО"))}</span>'
             f'<span class="plate" data-in="{t + 0.25:.2f}" data-fx="pop" data-dist="40"{ANIM}>{esc(e.get("line", "В ПРОФИЛЕ ↑"))}</span></div>')
 
@@ -237,12 +252,14 @@ def plan(spec, words_all, speed=None, voice_dir=None, base=None):
     for si, sec in enumerate(spec['sections']):
         if sec.get('clip'):                 # ready-made video with its own sound (e.g. a hook from Claude Design): one piece, no words
             cdur = clip_duration(Path(base) / sec['clip']) if base else float(sec.get('clip_dur', 3.0))
-            dur = q(cdur)
-            p = dict(section=sec['id'], idx=len(pieces), src=None, clip=sec['clip'], src_in=0.0, src_out=dur * speed, speed=speed,
+            csp = float(sec.get('clip_speed', 1.0))        # section "clip_speed": the ready clip is sped up (video setpts + audio atempo)
+            dur = q(cdur / csp)
+            p = dict(section=sec['id'], idx=len(pieces), src=None, clip=sec['clip'], src_in=0.0, src_out=cdur, speed=speed, clip_speed=csp,
                      out_in=out_t, out_out=q(out_t + dur), dur=dur, camera=None, cam_in=None)
             pieces.append(p); out_t = p['out_out']
             sections.append(dict(id=sec['id'], idx=si, out_in=p['out_in'], out_out=out_t, camera=None, angle=None, n_words=0, clip=True))
             continue
+        spd = float(sec.get('speed', speed))   # section "speed" overrides the reel speed (15/steps: 1.0, an instruction must not race)
         wsrc = words_all.get(sec['voice'])
         if wsrc is None:
             raise SystemExit(f"{sec['id']}: нет слов для {sec['voice']} в words.json")
@@ -263,8 +280,8 @@ def plan(spec, words_all, speed=None, voice_dir=None, base=None):
             else:
                 cuts = cut_silences(segs, a, b, float(sec.get('gap_max', GAP_MAX)), float(sec.get('gap_keep', GAP_KEEP)))
             for pa, pb in cuts:
-                dur = q((pb - pa) / speed)
-                p = dict(section=sec['id'], idx=len(pieces), src=sec['voice'], src_in=pa, src_out=pb, speed=speed,
+                dur = q((pb - pa) / spd)
+                p = dict(section=sec['id'], idx=len(pieces), src=sec['voice'], src_in=pa, src_out=pb, speed=spd,
                          out_in=out_t, out_out=q(out_t + dur), dur=dur, camera=sec.get('camera'),
                          cam_in=(pa + float(sec.get('cam_offset', 0))) if sec.get('camera') else None)
                 first_a = rng[0][0]
@@ -272,16 +289,68 @@ def plan(spec, words_all, speed=None, voice_dir=None, base=None):
                     mid = (w['start'] + w['end']) / 2
                     if mid < first_a < w['end']: mid = first_a                 # whisper started the word before the range: first piece
                     if pa - 1e-6 <= mid < pb:      # the word belongs to the piece holding its middle
-                        o0 = out_t + (max(w['start'], pa) - pa) / speed
-                        o1 = out_t + (min(w['end'], pb) - pa) / speed
+                        o0 = out_t + (max(w['start'], pa) - pa) / spd
+                        o1 = out_t + (min(w['end'], pb) - pa) / spd
                         ww = dict(section=sec['id'], word=w['word'], src_start=w['start'], src_end=w['end'],
                                   start=round(o0, 3), end=round(o1, 3), piece=p['idx'], proper=bool(w.get('proper')))
                         words.append(ww); sec_words.append(ww)
                 pieces.append(p); out_t = p['out_out']
-        sections.append(dict(id=sec['id'], idx=si, out_in=s_in, out_out=out_t, camera=sec.get('camera'),
-                             angle=sec.get('angle') or angle_of(sec.get('camera')), n_words=len(sec_words)))
+        if sec.get('hold'):                  # section "hold": seconds of silence appended (output time) — the camera / footage keeps running
+            hd = q(float(sec['hold'])); last = pieces[-1]
+            p = dict(section=sec['id'], idx=len(pieces), src=sec['voice'], src_in=last['src_out'], src_out=last['src_out'] + hd * spd, speed=spd,
+                     out_in=out_t, out_out=q(out_t + hd), dur=hd, camera=sec.get('camera'), silent=True,
+                     cam_in=(last['cam_in'] + (last['src_out'] - last['src_in'])) if sec.get('camera') else None)
+            pieces.append(p); out_t = p['out_out']
+        sd = dict(id=sec['id'], idx=si, out_in=s_in, out_out=out_t, camera=sec.get('camera'),
+                  angle=sec.get('angle') or angle_of(sec.get('camera')), n_words=len(sec_words))
+        if sec.get('broll'):                 # voice over a sequence of camera clips (not synced to the mic): plan_broll
+            sd['camera'] = 'broll'; sd['angle'] = sec.get('angle') or 'broll'
+            sd['broll'] = plan_broll(sec, out_t - s_in)
+            for p_ in pieces:
+                if p_['section'] == sec['id']: p_['broll'] = sec['id']
+        sections.append(sd)
     end = float(spec.get('_end_dur', 0.0))
     return dict(speed=speed, total=q(out_t + end), speech_end=out_t, end_dur=end, sections=sections, pieces=pieces, words=words)
+
+
+def plan_broll(sec, sec_dur):
+    """Section "broll": [{file, in, out, speed?, cx?, cy?}] -> clips on the section's output time. Without "speed" the
+    clips are stretched together so that they fill the section exactly (one common speed); "broll_fit": false keeps
+    "broll_speed" (1.0) and the last frame holds."""
+    clips = sec['broll']
+    src = sum(float(c['out']) - float(c['in']) for c in clips)
+    fit = sec.get('broll_fit', True)
+    common = src / sec_dur if fit else float(sec.get('broll_speed', 1.0))
+    out, t = [], 0.0
+    for c in clips:
+        sp = float(c.get('speed', common))
+        d = (float(c['out']) - float(c['in'])) / sp
+        out.append(dict(file=c['file'], src_in=float(c['in']), src_out=float(c['out']), speed=sp, cx=float(c.get('cx', 0.5)), cy=float(c.get('cy', 0.5)),
+                        out_in=round(t, 4), out_out=round(t + d, 4)))
+        t += d
+    if fit and abs(t - sec_dur) > 0.05:
+        raise SystemExit(f"{sec['id']}: broll {t:.2f} с против секции {sec_dur:.2f} с")
+    return dict(clips=out, dur=round(t, 4), common_speed=round(common, 4))
+
+
+def broll_video(sec_pl, vdir, cube, out):
+    """One video for the whole broll section: every clip sped (setpts), through the camera LUT, scaled to cover 1080x1920
+    and cropped around (cx, cy); concat."""
+    parts = []
+    for i, c in enumerate(sec_pl['clips']):
+        f = out.parent / f"{out.stem}_{i:02d}.mp4"
+        cd = clip_duration(vdir / c['file'])
+        if c['src_out'] > cd + 0.02: raise SystemExit(f"broll {c['file']}: out {c['src_out']:.2f} с > длины клипа {cd:.2f} с")
+        n = fr(c['out_out']) - fr(c['out_in'])
+        vf = (f"setpts=PTS/{c['speed']:.6f},{camlut(cube)},{build_render.TOYUV},fps={FPS},"
+              f"scale=w='if(gt(iw/ih,{W}/{H}),-2,{W})':h='if(gt(iw/ih,{W}/{H}),{H},-2)':flags=lanczos,"
+              f"crop={W}:{H}:x='(iw-{W})*{c['cx']:.3f}':y='(ih-{H})*{c['cy']:.3f}',setsar=1,tpad=stop_mode=clone:stop_duration=2")
+        run(['ffmpeg', '-v', 'error', '-y', '-ss', f"{c['src_in']:.6f}", '-t', f"{(c['src_out'] - c['src_in']) + 0.5:.6f}", '-i', str(vdir / c['file']),
+             '-vf', vf, '-frames:v', str(n), '-r', str(FPS), '-c:v', 'libx264', '-preset', 'fast', '-crf', '14',
+             '-pix_fmt', 'yuv420p', '-g', '30', str(f)])
+        parts.append(f)
+    build_render.concat_list(out.with_suffix('.txt'), parts)
+    run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(out.with_suffix('.txt')), '-c', 'copy', str(out)])
 
 
 def clip_duration(path):
@@ -350,6 +419,9 @@ def display(w, fixes):
 
 
 CSS = f'''
+.sld, .sldd {{ position:absolute; left:0; top:0; width:{W}px; height:{H}px; }}
+.sld {{ z-index:1; }}
+.sldd {{ z-index:3; }}
 .rl {{ position:absolute; font-family:'Unbounded', sans-serif; font-weight:700; color:{TEXT}; text-shadow:0 2px 6px rgba(0,0,0,.6); text-transform:none; }}
 .rhook {{ left:0; top:0; width:{W}px; display:flex; flex-direction:column; align-items:center; gap:4px; }}
 .rhook .ln {{ font-weight:900; font-size:86px; line-height:1.1; letter-spacing:-.02em; text-shadow:0 4px 14px rgba(0,0,0,.7); white-space:nowrap; }}
@@ -360,6 +432,7 @@ CSS = f'''
 .capl .w.acc {{ color:{ACCENT}; font-weight:800; font-size:54px; text-shadow:0 0 18px {ACCENT}99, 0 2px 6px rgba(0,0,0,.6); }}
 .capl.one .w {{ font-size:50px; }}
 .capl.ftgcap {{ z-index:6; }}
+.capl {{ z-index:6; }}
 .stk {{ position:absolute; transform-origin:center; background:#FFFFFF; color:#111; font-family:'Unbounded', sans-serif; font-weight:800; font-size:34px;
   padding:14px 26px 16px; border-radius:22px; box-shadow:0 6px 18px rgba(0,0,0,.35); white-space:nowrap; }}
 .stk.app {{ width:150px; height:150px; padding:0; border-radius:34px; overflow:hidden; display:flex; align-items:center; justify-content:center; }}
@@ -383,11 +456,21 @@ CSS = f'''
 .dev .scr .logo {{ width:34%; margin-top:22%; aspect-ratio:1; border-radius:22%; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.6); }}
 .dev .scr .logo img {{ width:100%; height:100%; object-fit:cover; }}
 .dev .frm {{ position:absolute; left:0; top:0; display:block; }}
+.vid {{ position:absolute; overflow:hidden; z-index:2; background:#000; box-shadow:0 24px 50px rgba(0,0,0,.55); border:3px solid rgba(255,255,255,.14); }}
+.vid .seq {{ position:absolute; inset:0; }}
+.vid .seq img.sf {{ position:absolute; left:0; top:0; width:100%; height:100%; object-fit:cover; display:none; }}
+.vid .seq img.sf.on {{ display:block; }}
+.vbd {{ position:absolute; inset:0; background:rgba(5,5,5,.9); z-index:1; }}
+.cnt {{ position:absolute; z-index:5; font-family:'Unbounded',sans-serif; }}
+.cnt .num {{ font-weight:800; font-size:118px; line-height:1; letter-spacing:-.02em; color:{ACCENT}; text-shadow:0 4px 18px rgba(0,0,0,.7); font-variant-numeric:tabular-nums; }}
+.cnt .lbl {{ margin-top:8px; font-size:30px; font-weight:600; color:#fff; text-shadow:0 2px 8px rgba(0,0,0,.7); letter-spacing:.04em; }}
+.vid .vlab {{ position:absolute; left:22px; top:18px; padding:6px 14px; background:{ACCENT}; color:#0A0A0A; font:700 30px/1.2 'Unbounded',sans-serif; border-radius:8px; letter-spacing:.02em; }}
 .dev .scr .seq {{ position:absolute; inset:0; }}
+.dev .scr .scrv {{ position:absolute; inset:0; }}
 .dev .scr .seq img.sf {{ position:absolute; left:0; top:0; width:100%; height:100%; display:none; }}
 .dev .scr .seq img.sf.on {{ display:block; }}
 .ui {{ position:absolute; left:0; top:0; width:{W}px; height:{H}px; background:{UI_BG}; z-index:4; overflow:hidden; font-family:'Unbounded', sans-serif; color:#EDEDED; }}
-.ui .top {{ height:150px; display:flex; align-items:center; padding:0 60px; gap:24px; border-bottom:2px solid #1F1F1F; font-size:40px; font-weight:800; }}
+.ui .top {{ margin-top:230px; height:150px; display:flex; align-items:center; padding:0 60px; gap:24px; border-bottom:2px solid #1F1F1F; font-size:40px; font-weight:800; }}
 .ui .top .dot {{ width:22px; height:22px; border-radius:50%; background:{UI_ACCENT}; }}
 .ui .search {{ margin:50px 60px 0; height:110px; border-radius:26px; background:#171717; border:2px solid #262626; display:flex; align-items:center; padding:0 36px; font-size:34px; color:#9A9A9A; }}
 .ui .rows {{ margin:50px 60px 0; display:flex; flex-direction:column; gap:26px; }}
@@ -401,7 +484,41 @@ CSS = f'''
 .ui .tile .bd {{ position:absolute; left:20px; top:20px; background:{UI_ACCENT}; color:#111; font-weight:800; font-size:28px; padding:8px 16px; border-radius:14px; }}
 .ui .tile .ft {{ position:absolute; left:20px; bottom:20px; font-size:28px; color:#BDBDBD; }}
 .ui .cursor {{ position:absolute; width:90px; height:90px; border-radius:50%; border:6px solid {UI_ACCENT}; box-shadow:0 0 24px {UI_ACCENT}99; }}
-.ui .ucap {{ position:absolute; left:0; top:1660px; width:{W}px; text-align:center; font-size:50px; font-weight:700; color:{TEXT}; text-shadow:0 2px 6px rgba(0,0,0,.6); }}
+.ui .ucap {{ position:absolute; left:0; top:1300px; width:{W}px; text-align:center; font-size:50px; font-weight:700; color:{TEXT}; text-shadow:0 2px 6px rgba(0,0,0,.6); }}
+.pnl {{ position:absolute; z-index:2; overflow:hidden; background:#0A0A0A; border:2px solid #1E1E1E; box-sizing:border-box; font-family:'Unbounded', sans-serif; color:#EDEDED; }}
+.pnl .seq {{ position:absolute; inset:0; }}
+.pnl .scr {{ position:absolute; left:0; bottom:0; width:{W}px; height:{H}px; }}
+.pnl .shade {{ position:absolute; left:0; top:0; width:100%; height:420px; background:linear-gradient(180deg,#0A0A0A 0%,#0A0A0A 45%,rgba(10,10,10,0) 100%); }}
+.pnl .seq img.sf {{ position:absolute; left:0; top:0; width:100%; height:100%; object-fit:cover; display:none; }}
+.pnl .seq img.sf.on {{ display:block; }}
+.pnl .top {{ position:absolute; left:0; top:0; width:100%; height:110px; display:flex; align-items:center; padding:0 50px; gap:20px; box-sizing:border-box; border-bottom:2px solid #1A1A1A; font-size:34px; font-weight:800; background:#111; }}
+.pnl .top .dot {{ width:18px; height:18px; border-radius:50%; background:{ACCENT}; }}
+.pnl .inp {{ position:absolute; left:50px; right:50px; bottom:140px; height:130px; border-radius:40px; background:#161616; border:2px solid #262626; display:flex; align-items:center; padding:0 40px; gap:14px; box-sizing:border-box; }}
+.pnl .inp .bar {{ width:10px; border-radius:5px; background:{ACCENT}; }}
+.pnl .inp .mic {{ margin-left:auto; width:76px; height:76px; border-radius:50%; background:{ACCENT}; }}
+.pnl .tag {{ position:absolute; left:0; width:100%; bottom:60px; text-align:center; font-size:22px; letter-spacing:.2em; color:#4A4A4A; font-weight:600; }}
+.pnl .ans {{ position:absolute; left:60px; right:60px; top:170px; }}
+.pnl .ans .ttl {{ font-size:40px; font-weight:800; color:{ACCENT}; margin-bottom:34px; }}
+.pnl .ans .ln {{ height:30px; border-radius:15px; background:#1E1E1E; margin-bottom:26px; }}
+.cm {{ position:absolute; left:0; top:0; width:{W}px; height:{H}px; background:#0A0A0A; z-index:3; font-family:'Unbounded', sans-serif; color:#EDEDED; }}
+.cm .card {{ position:absolute; left:60px; width:960px; border-radius:34px; background:#141414; border:2px solid #222; box-sizing:border-box; padding:36px 44px; }}
+.cm .hd {{ font-size:28px; color:#8A8A8A; font-weight:600; letter-spacing:.04em; margin-bottom:28px; }}
+.cm .row {{ display:flex; align-items:center; gap:24px; height:110px; }}
+.cm .av {{ width:84px; height:84px; border-radius:50%; background:linear-gradient(135deg,#3A3A3A,#1E1E1E); flex:none; border:2px solid #2A2A2A; }}
+.cm .av.me {{ background:linear-gradient(135deg,{ACCENT},#7A3A22); }}
+.cm .nm {{ font-size:30px; color:#9A9A9A; margin-right:6px; }}
+.cm .txt {{ font-size:40px; font-weight:800; color:{ACCENT}; letter-spacing:.04em; }}
+.cm .inp {{ margin-top:22px; height:120px; border-radius:40px; background:#1A1A1A; border:2px solid #2C2C2C; display:flex; align-items:center; padding:0 34px; gap:22px; box-sizing:border-box; }}
+.cm .ph {{ font-size:32px; color:#6A6A6A; }}
+.cm .typed {{ font-size:40px; font-weight:800; color:#FFFFFF; letter-spacing:.04em; display:flex; }}
+.cm .cur {{ width:4px; height:48px; background:{ACCENT}; margin-left:6px; border-radius:2px; }}
+.cm .snd {{ margin-left:auto; font-size:28px; font-weight:800; color:{ACCENT}; }}
+.cm .dm {{ position:absolute; left:60px; width:960px; border-radius:34px; background:#1C1C1C; border:2px solid #2A2A2A; box-sizing:border-box; padding:34px 44px; display:flex; align-items:center; gap:30px; }}
+.cm .dm .fi {{ width:110px; height:110px; border-radius:26px; background:{ACCENT}; display:flex; align-items:center; justify-content:center; flex:none; }}
+.cm .dm .fi img, .cm .dm .fi svg {{ width:62%; height:62%; }}
+.cm .dm .fn {{ font-size:38px; font-weight:800; color:#FFFFFF; }}
+.cm .dm .fm {{ font-size:26px; color:#8A8A8A; margin-top:8px; }}
+.cm .ln {{ position:absolute; left:0; width:{W}px; text-align:center; font-size:40px; font-weight:800; color:{ACCENT}; letter-spacing:.02em; text-shadow:0 0 24px {ACCENT}66; }}
 '''
 
 
@@ -410,7 +527,7 @@ def _el(cls, t_in, t_out=None, fx='cut', dur=0.01, ofx='cut', odur=0.01, style='
     return f'<div class="{cls}" data-in="{t_in:.3f}"{o} data-fx="{fx}" data-dur="{dur}" data-ofx="{ofx}" data-odur="{odur}" style="{style}" {extra}>'
 
 
-def caption_html(words, fixes, accents, y, t_end, one=False, cls='', box=None, skip=(), size=None):
+def caption_html(words, fixes, accents, y, t_end, one=False, cls='', box=None, skip=(), size=None, acc_color=None):
     """Phrases of 1–4 words at y (centre) inside box=(left, width, align); every word slides up 30 px into its final
     slot at its spoken time; the phrase is cut at the next phrase's first word (or t_end). Phrases inside a `skip`
     interval (memes on screen) are not shown — the meme caption is the subtitle then."""
@@ -427,7 +544,8 @@ def caption_html(words, fixes, accents, y, t_end, one=False, cls='', box=None, s
         for w in ph:
             txt = display(w, fixes)
             acc = ' acc' if is_accent(w['word'], accents) or is_accent(txt, accents) else ''
-            fs = f' style="font-size:{int(size * 1.12 if acc else size)}px"' if size else ''
+            st_ = (f'font-size:{int(size * 1.12 if acc else size)}px;' if size else '') + (f'color:{acc_color};text-shadow:2px 0 0 #141414,-2px 0 0 #141414,0 2px 0 #141414,0 -2px 0 #141414,0 5px 0 #141414,0 0 24px {acc_color}CC;' if acc and acc_color else '')
+            fs = f' style="{st_}"' if st_ else ''
             o.append(f'<span class="w{acc}" data-in="{w["start"]:.3f}" data-fx="slide-up" data-dist="30" data-dur="0.1"{fs}>{_html.escape(txt)}</span>')
         o.append('</div>')
     return '\n'.join(o)
@@ -477,15 +595,16 @@ FEED_SVG = ('<svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">'
 BUILTIN_IMAGES = {'formula': FORMULA_SVG, 'people10': people_svg(10, 0), 'people8': people_svg(10, 8), 'clock12': CLOCK_SVG, 'feed': FEED_SVG}
 
 
-def image_html(src, t, t_out, x, y, w, h, base):
-    """An illustration / logo: a builtin svg (BUILTIN_IMAGES) or a png/svg/jpg file (path from the spec folder)."""
+def image_html(src, t, t_out, x, y, w, h, base, fx='slide-up', dur=0.5, ofx='fade', odur=0.35):
+    """An illustration / logo: a builtin svg (BUILTIN_IMAGES) or a png/svg/jpg file (path from the spec folder).
+    fx 'pop' (reel 3 v6): overshoot scale-in, ofx 'cut' — a chain of images in one slot swaps like a dress-up."""
     if src in BUILTIN_IMAGES:
         inner = BUILTIN_IMAGES[src]
     else:
         p = Path(src) if Path(src).is_absolute() else base / src
         if not p.is_file(): raise SystemExit(f'картинка не найдена: {p}')
         inner = f'<img src="{p.resolve().as_uri()}" alt="">'
-    return (f'<div class="img" data-in="{t:.3f}" data-out="{t_out:.3f}" data-fx="slide-up" data-dist="36" data-dur="0.5" data-ofx="fade" data-odur="0.35" '
+    return (f'<div class="img" data-in="{t:.3f}" data-out="{t_out:.3f}" data-fx="{fx}" data-dist="36" data-dur="{dur}" data-ofx="{ofx}" data-odur="{odur}" '
             f'style="left:{x}px;top:{y}px;width:{w}px;height:{h}px">{inner}</div>')
 
 
@@ -518,22 +637,35 @@ DEVICE_FRAMES = {   # frame png -> (outer box, screen hole) in png px: MockUPhon
 }
 
 
-def screen_frames_html(video, w, h, t0, t_out):
+def screen_frames_html(video, w, h, t0, t_out, cover=False, speed=1.0, start=0.0, crop_top=None, crop_bottom=0):
     """Frames of `video` for the phone screen: <video>.frames_<w>x<h>/%04d.jpg at FPS (cached by mtime), as hidden
     <img> elements with data-fi; the page shows the one for floor((t - t0) * FPS), clamped to the last frame."""
-    fdir = video.parent / f'{video.stem}.frames_{w}x{h}'
-    stamp = fdir / 'stamp.txt'; want = f'{video.stat().st_mtime_ns} {w} {h} {FPS}'
+    fdir = video.parent / (f'{video.stem}.frames_{w}x{h}' + ('c' if cover else '') + (f'_t{crop_top}b{crop_bottom}' if crop_top is not None else '') + (f'_s{speed:g}_i{start:g}' if speed != 1.0 or start else ''))
+    stamp = fdir / 'stamp.txt'; want = f'{video.stat().st_mtime_ns} {w} {h} {FPS} {int(cover)} {speed} {start} {crop_top} {crop_bottom}'
     if not (stamp.is_file() and stamp.read_text() == want):
         if fdir.is_dir():
             for f in fdir.glob('*.jpg'): f.unlink()
         fdir.mkdir(exist_ok=True)
-        run(['ffmpeg', '-v', 'error', '-y', '-i', str(video), '-vf', f'fps={FPS},scale={w}:{h}:flags=lanczos', '-q:v', '2', str(fdir / '%04d.jpg')])
+        run(['ffmpeg', '-v', 'error', '-y', '-ss', f'{start:.3f}', '-i', str(video), '-vf', (f'setpts=PTS/{speed:.4f},' if speed != 1.0 else '') + (f'fps={FPS},crop=iw:ih-{int(crop_top) + int(crop_bottom)}:0:{int(crop_top)},scale={w}:-2:flags=lanczos,pad={w}:{h}:0:0:black,crop={w}:{h}:0:0' if crop_top is not None else f'fps={FPS},scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}' if cover else f'fps={FPS},scale={w}:{h}:flags=lanczos'), '-q:v', '2', str(fdir / '%04d.jpg')])
         stamp.write_text(want)
     frames = sorted(fdir.glob('*.jpg'))
     if not frames: raise SystemExit(f'экран: нет кадров из {video}')
     n_need = fr(t_out - t0) + 1
     imgs = ''.join(f'<img class="sf" data-fi="{i}" src="{f.resolve().as_uri()}" alt="">' for i, f in enumerate(frames[:n_need]))
     return f'<div class="seq" data-t0="{t0:.4f}" data-fps="{FPS}" data-n="{min(len(frames), n_need)}">{imgs}</div>'
+
+
+def video_html(v, t, t_out, base):
+    """Section "videos": [{at_word, out_word?, src (mp4), x, y, w, h, radius?, label?}] — a rounded video card (object-fit
+    cover) as a jpg sequence driven by seekExtra (like the phone screen). Reel 2 (2026-11-03): the trend reel over the
+    camera, the reference editor's split «reel on top / camera below». `label` — small accent tag at the top-left corner."""
+    sp = Path(v['src']) if Path(v['src']).is_absolute() else base / v['src']
+    if not sp.is_file(): raise SystemExit(f'видео не найдено: {sp}')
+    x, y, w, h = int(v.get('x', 90)), int(v.get('y', 120)), int(v.get('w', 900)), int(v.get('h', 700))
+    inner = screen_frames_html(sp, w, h, t + float(v.get('delay', 0.0)), t_out, cover=True, speed=float(v.get('speed', 1.0)), start=float(v.get('in', 0.0)))
+    lab = f'<div class="vlab" style="top:{int(v.get("label_y", 18))}px">{_html.escape(v["label"])}</div>' if v.get('label') else ''   # label_y: full-screen card -> below the Reels header (>= 240)
+    return (f'<div class="vid" data-in="{t:.3f}" data-out="{t_out:.3f}" data-fx="{v.get("fx", "slide-up")}" data-dist="{v.get("dist", 60)}" data-dur="{v.get("dur", 0.4)}" '
+            f'data-ofx="fade" data-odur="0.25" style="left:{x}px;top:{y}px;width:{w}px;height:{h}px;border-radius:{v.get("radius", 28)}px">{inner}{lab}</div>')
 
 
 def device_html(d, t, t_out, base):
@@ -547,7 +679,15 @@ def device_html(d, t, t_out, base):
     w = int(d.get('w', 400)); k = w / bw; h = int(bh * k)
     x, y = int(d.get('x', W - w - 50)), int(d.get('y', 600))
     scr = d.get('screen')
-    if scr:
+    if d.get('screens'):          # several screencasts on one phone: [{src, at_word, out_word?, speed?, in?}] (times resolved by the caller: _t_in/_t_out)
+        parts = []
+        for sc in d['screens']:
+            sp = Path(sc['src']) if Path(sc['src']).is_absolute() else base / sc['src']
+            if not sp.is_file(): raise SystemExit(f'экран не найден: {sp}')
+            seq = screen_frames_html(sp, int(round(sw * k)), int(round(sh * k)), sc['_t_in'], sc['_t_out'], speed=float(sc.get('speed', 1.0)), start=float(sc.get('in', 0.0)))
+            parts.append(f'<div class="scrv" data-in="{sc["_t_in"]:.3f}" data-out="{sc["_t_out"]:.3f}" data-fx="fade" data-dur="0.12" data-ofx="fade" data-odur="0.3">{seq}</div>')
+        inner = ''.join(parts)
+    elif scr:
         sp = Path(scr) if Path(scr).is_absolute() else base / scr
         if not sp.is_file(): raise SystemExit(f'экран не найден: {sp}')
         if sp.suffix.lower() in ('.mp4', '.mov', '.webm'):
@@ -572,6 +712,99 @@ def device_html(d, t, t_out, base):
             f'</div></div>')
 
 
+def panel_html(pn, s_in, s_out, speech_end, base):
+    """Section "panel" (reel 3, 2026-11-07): the lower part of the split = a phone screencast panel {src?, x, y, w, h,
+    radius?, title?, label?, answer?, grow: [{at?, to: {x, y, w, h}, dur, hold, back, back_dur?}]}. Without `src` — a
+    dark chat mock (header, voice-input field, small label). `grow`: at `at` s from the section start (default = the end
+    of the section's speech = the start of its "hold") the panel eases (ease-out cubic, `dur`) to the `to` box, stays
+    `hold` s (placeholder «ОТВЕТ…» + skeleton lines) and eases back the same way (`back_dur` = dur): `back` true = at the
+    end of the hold inside the section, "next" = over the first back_dur s of the NEXT section (the panel stays full till
+    the section end, the camera jump cut hides under it; reel 3 v2), false = stays full (a clean cut into a camera-less
+    section). Geometry per frame — PANEL_JS (seekExtra). Returns (html, events): one whoosh on the grow, nothing on the way back."""
+    x, y, w, h = (int(pn.get(k, d)) for k, d in (('x', 0), ('y', H // 2), ('w', W), ('h', H // 2)))
+    keys, events, inner, p_out = [], [], '', s_out
+    for g in pn.get('grow') or []:
+        t0 = s_in + float(g['at']) if g.get('at') is not None else speech_end
+        gd, hd = float(g.get('dur', 0.35)), float(g.get('hold', 2.5))
+        back = g.get('back', True)
+        bd = float(g.get('back_dur', gd)) if back else 0.0
+        if back == 'next':             # the way back runs over the start of the next section: hold till the section end
+            hd = max(0.0, s_out - t0 - gd); p_out = s_out + bd
+        to = g.get('to') or {}
+        keys.append(dict(t0=round(t0, 3), gd=gd, hold=hd, bd=bd, to=[int(to.get('x', 0)), int(to.get('y', 0)), int(to.get('w', W)), int(to.get('h', H))]))
+        events.append(('whoosh', t0))
+        if g.get('src'):              # the answer screencast: from the grow start till the panel is gone (crop_top: status bar off)
+            gp = Path(g['src']) if Path(g['src']).is_absolute() else base / g['src']
+            if not gp.is_file(): raise SystemExit(f'панель: видео ответа не найдено: {gp}')
+            g_end = s_out + bd if back == 'next' else s_out
+            ga = t0 + float(g.get('src_at', 0.0))
+            inner += (f'<div class="scr" data-in="{ga:.3f}" data-out="{g_end:.3f}" data-fx="fade" data-dur="0.15" data-ofx="cut" data-odur="0.01">'
+                      + screen_frames_html(gp, W, H, ga, g_end, speed=float(g.get('speed', 1.0)), start=float(g.get('in', 0.0)), crop_top=int(g.get('crop_top', pn.get('crop_top', 0))), crop_bottom=int(g.get('crop_bottom', pn.get('crop_bottom', 0)))) + '</div>')
+            continue
+        inner += (f'<div class="ans" data-in="{t0 + gd * 0.6:.3f}" data-out="{t0 + gd + hd:.3f}" data-fx="fade" data-dur="0.2" data-ofx="fade" data-odur="0.12">'
+                  f'<div class="ttl">{_html.escape(pn.get("answer", "ОТВЕТ…"))}</div>'
+                  + ''.join(f'<div class="ln" data-in="{t0 + gd + 0.12 * i:.3f}" data-fx="slide-up" data-dist="20" data-dur="0.2" style="width:{wd}%"></div>'
+                            for i, wd in enumerate((92, 70, 84, 55, 78, 64))) + '</div>')
+    t_grow = keys[0]['t0'] if keys else s_out
+    src_end = t_grow + float(pn['grow'][0].get('src_at', 0.0)) if keys else s_out     # the input clip runs into the grow phase
+    sb = int(pn.get('src_bottom', 0))
+    if pn.get('src'):
+        sp = Path(pn['src']) if Path(pn['src']).is_absolute() else base / pn['src']
+        if not sp.is_file(): raise SystemExit(f'панель: видео не найдено: {sp}')
+        inner = (f'<div class="scr" data-in="{s_in:.3f}" data-out="{src_end:.3f}" data-fx="cut" data-ofx="cut" data-odur="0.01" style="bottom:{sb}px" data-sb="{sb}" data-t0="{t_grow:.3f}" data-gd="{keys[0]["gd"] if keys else 0.5}">'
+                 + screen_frames_html(sp, W, H, s_in + float(pn.get('delay', 0.0)), src_end, speed=float(pn.get('speed', 1.0)), start=float(pn.get('in', 0.0)), crop_top=int(pn.get('crop_top', 0)), crop_bottom=int(pn.get('crop_bottom', 0)))
+                 + '</div>' + f'<div class="shade" data-in="{s_in:.3f}" data-out="{t_grow:.3f}" data-fx="cut" data-ofx="fade" data-odur="0.25"></div>' + inner)   # the captions sit on the panel top: shade the screencast under them while the phrase runs
+    else:
+        bars = ''.join(f'<div class="bar" style="height:{hh}px"></div>' for hh in (26, 48, 70, 40, 58, 30, 66, 44, 24))
+        inner = (f'<div class="top"><div class="dot"></div>{_html.escape(pn.get("title", "ChatGPT"))}</div>'
+                 f'<div class="inp" data-in="{s_in:.3f}" data-out="{t_grow:.3f}" data-fx="fade" data-dur="0.15" data-ofx="fade" data-odur="0.12">{bars}<div class="mic"></div></div>'
+                 f'<div class="tag">{_html.escape(pn.get("label", "СКРИНКАСТ"))}</div>' + inner)
+    r = int(pn.get('radius', 36))
+    return (f'<div class="pnl" data-in="{s_in:.3f}" data-out="{p_out:.3f}" data-fx="{pn.get("fx", "cut")}" data-dur="{pn.get("dur", 0.01)}" data-ofx="cut" data-odur="0.01" '
+            f'data-box="{json.dumps([x, y, w, h])}" data-keys="{_html.escape(json.dumps(keys))}" data-radius="{r}" '
+            f'style="left:{x}px;top:{y}px;width:{w}px;height:{h}px;border-radius:{r}px {r}px 0 0">{inner}</div>'), events
+
+
+def comment_html(c, s_in, s_out, wt, base):
+    """Section "comment" (reel 3 v2, 2026-11-07, camera null): one continuous Instagram-comment scene instead of the scheme.
+    {text: "КУРС", at_word, placeholder?, name?, letter: 0.09, send_delay: 0.5, y?, dm?: {at_word, file, meta?, icon?, y?},
+    line?: {at_word, text, y?}}. The comment field («Добавьте комментарий…») fills letter by letter from `at_word` with a
+    blinking cursor (COMMENT_JS), `send_delay` s after the last letter the comment moves into the list (the one tick);
+    on dm.at_word a DM bubble with the file tile eases up from below (slide-up 60 px, 0.45 s); on line.at_word the text
+    line (e.g. «Claude · 2 минуты») fades in. Soft eases, no pans, no pops, no whoosh. Returns (html, events)."""
+    t_type = wt(c['at_word']); step = float(c.get('letter', 0.09)); text = c['text']
+    t_send = t_type + step * len(text) + float(c.get('send_delay', 0.5))
+    y = int(c.get('y', 560)); ph = c.get('placeholder', 'Добавьте комментарий…'); nm = c.get('name', 'ты')
+    E = _html.escape
+    letters = ''.join(f'<span data-in="{t_type + step * i:.3f}" data-fx="cut">{E(ch)}</span>' for i, ch in enumerate(text))
+    o = [_el('cm', s_in, s_out, fx='fade', dur=0.25, ofx='fade', odur=0.15),
+         f'<div class="card" style="top:{y}px"><div class="hd">КОММЕНТАРИИ</div>',
+         f'<div class="row" data-in="{t_send:.3f}" data-fx="slide-up" data-dist="30" data-dur="0.35"><div class="av me"></div><span class="nm">{E(nm)}</span><span class="txt">{E(text)}</span></div>',
+         f'<div class="inp"><div class="av"></div>'
+         f'<span class="ph" data-in="{s_in:.3f}" data-out="{t_type:.3f}" data-fx="fade" data-dur="0.2" data-ofx="fade" data-odur="0.1">{E(ph)}</span>'
+         f'<span class="typed" data-in="{t_type:.3f}" data-out="{t_send:.3f}" data-fx="cut" data-ofx="cut">{letters}<span class="cur" data-t0="{t_type:.3f}"></span></span>'
+         f'<span class="snd" data-in="{t_type + step * len(text):.3f}" data-out="{t_send:.3f}" data-fx="fade" data-dur="0.2" data-ofx="fade" data-odur="0.1">ОПУБЛИКОВАТЬ</span></div></div>']
+    events = [('tick', t_send)]
+    dm = c.get('dm')
+    if dm:
+        t_dm = wt(dm['at_word'])
+        ic = dm.get('icon')
+        if ic:
+            ip = Path(ic) if Path(ic).is_absolute() else base / ic
+            if not ip.is_file(): raise SystemExit(f'comment.dm.icon не найден: {ip}')
+            tile = f'<img src="{ip.resolve().as_uri()}" alt="">'
+        else:
+            tile = '<svg viewBox="0 0 24 24" fill="none" stroke="#0A0A0A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>'
+        o.append(f'<div class="dm" data-in="{t_dm:.3f}" data-fx="slide-up" data-dist="60" data-dur="0.45" style="top:{int(dm.get("y", y + 560))}px">'
+                 f'<div class="fi">{tile}</div><div><div class="fn">{E(dm.get("file", "гайд.pdf"))}</div><div class="fm">{E(dm.get("meta", "PDF · в директ"))}</div></div></div>')
+    ln = c.get('line')
+    if ln:
+        t_ln = wt(ln['at_word'])
+        o.append(f'<div class="ln" data-in="{t_ln:.3f}" data-fx="fade" data-dur="0.35" style="top:{int(ln.get("y", y + 820))}px">{E(ln["text"])}</div>')
+    o.append('</div>')
+    return '\n'.join(o), events
+
+
 def ui_card_html(card, t0, t1, cap_words, fixes, n):
     """Full-screen dark UI mock (opaque): title bar, rows / tiles, a cursor ring; the state (highlighted row, cursor)
     alternates every UI_SUBCUT s = a 'new screen'; one caption word per visible word under the UI."""
@@ -584,7 +817,7 @@ def ui_card_html(card, t0, t1, cap_words, fixes, n):
         sa = t0 + st * UI_SUBCUT; sb = min(t1, sa + UI_SUBCUT)
         if sb <= sa: continue
         hi = st % max(len(lines), 1)
-        o.append(_el('sub', sa, sb, style='position:absolute;left:0;top:150px;width:1080px;height:1500px;'))
+        o.append(_el('sub', sa, sb, style='position:absolute;left:0;top:380px;width:1080px;height:1500px;'))
         if numeric:
             o.append('<div class="tiles">' + ''.join(
                 f'<div class="tile"{" style=\'border-color:" + UI_ACCENT + "\'" if j == hi else ""}><div class="bd">{_html.escape(v)}</div><div class="ft">reel {j + 1}</div></div>'
@@ -604,7 +837,7 @@ def ui_card_html(card, t0, t1, cap_words, fixes, n):
 
 def scheme_card(sec, sp, pl):
     """Spec section "scheme" -> a scheme.py card in OUTPUT seconds: node pops / pans / words at the spoken words."""
-    st = dict(scheme.STYLE); st.update(sp.get('style') or {})
+    st = dict(scheme.STYLE); st.update(sec.get('style') or sp.get('style') or {})   # section "style": pan, node_dur, word_dur, arc_dur (reel 3 v3: softer)
     s_in, s_out = sp['out_in'], sp['out_out']
     nodes, cursor = [], s_in
     offs = [[0, 0], [830, 900], [-440, 960]]
@@ -648,14 +881,53 @@ def scheme_card(sec, sp, pl):
                     item[1] = max(item[1], nd['at'])
             if ph.get('number'): ph['number'][1] = max(ph['number'][1], nd['at'])
         nodes.append(nd)
-    card = dict(id=f'scheme_{sec["id"]}', type='scheme', start=s_in, end=s_out, style=sp.get('style') or {}, nodes=nodes)
+    card = dict(id=f'scheme_{sec["id"]}', type='scheme', start=s_in, end=s_out, style=sec.get('style') or sp.get('style') or {}, nodes=nodes)
     card = scheme.normalize(card)
     bad = scheme.validate(card)
     if bad: raise SystemExit('схема: ' + '; '.join(bad))
     return card
 
 
+GLITCH_CSS = """
+.gl { position:absolute; left:0; top:0; width:1080px; height:1920px; background:#000; overflow:hidden; z-index:1000; }
+.gl-wrap { position:absolute; left:0; top:0; width:1080px; height:1920px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:34px; }
+.gl-t, .gl-s { position:relative; width:1080px; text-align:center; font-family:'Unbounded', sans-serif; white-space:nowrap; }
+.gl-t { height:150px; font-weight:900; font-size:118px; line-height:150px; letter-spacing:-.02em; }
+.gl-s { height:70px; font-weight:700; font-size:44px; line-height:70px; letter-spacing:.04em; text-transform:uppercase; }
+.gl .l { position:absolute; left:0; top:0; width:100%; }
+.gl .l.b { color:#FFFFFF; } .gl-s .l.b { color:ACC; }
+.gl .l.r { color:#FF2A4A; mix-blend-mode:screen; opacity:0; } .gl .l.c { color:#19E0FF; mix-blend-mode:screen; opacity:0; }
+.gl-scan { position:absolute; left:0; top:0; width:1080px; height:1920px; pointer-events:none; opacity:.18;
+  background:repeating-linear-gradient(0deg, rgba(255,255,255,.08) 0 2px, rgba(0,0,0,0) 2px 5px); }
+.gl-bar { position:absolute; left:0; width:1080px; height:0px; background:rgba(255,255,255,.07); top:0; }
+"""
+GLITCH_JS = """(function(){const prev=window.seekExtra;function rnd(i,k){const x=Math.sin(i*127.1+k*311.7)*43758.5453;return x-Math.floor(x);}
+window.seekExtra=function(t){if(prev)prev(t);document.querySelectorAll('.gl').forEach(g=>{const r=t-(+g.dataset.t0);if(r<0)return;const f=Math.floor(r*30+1e-6);
+const burst=(r<0.4)||(r%0.75<0.12)||(rnd(f,9)<0.03);const amp=r<0.4?1.0:0.55;
+g.querySelectorAll('.gl-t,.gl-s').forEach((el,ei)=>{const k=ei*7;const on=burst&&rnd(f,k+1)<0.85;
+const dx=on?(rnd(f,k+2)-0.5)*26*amp:0;const a=on?Math.floor(rnd(f,k+3)*60):0,b=on?Math.floor(rnd(f,k+4)*60):0;
+el.querySelectorAll('.l').forEach(l=>{const c=l.classList.contains('r')?1:l.classList.contains('c')?-1:0;
+if(c===0){l.style.transform='translateX('+(on?dx*0.35:0).toFixed(1)+'px)';l.style.clipPath=on?'inset(0 0 '+b+'% 0)':'none';l.style.opacity=(on&&rnd(f,k+5)<0.12)?0.6:1;}
+else{l.style.opacity=on?0.9:0;l.style.transform='translateX('+(c*(6+rnd(f,k+6)*14)*amp+dx).toFixed(1)+'px)';l.style.clipPath='inset('+(c>0?a:0)+'% 0 '+(c<0?b:0)+'% 0)';}});});
+const bar=g.querySelector('.gl-bar');if(bar){const sh=burst&&rnd(f,21)<0.6;bar.style.height=sh?(40+rnd(f,22)*120).toFixed(0)+'px':'0px';bar.style.top=(rnd(f,23)*1800).toFixed(0)+'px';}
+g.querySelector('.gl-wrap').style.transform=burst&&rnd(f,31)<0.3?'translate('+((rnd(f,32)-0.5)*10).toFixed(1)+'px,'+((rnd(f,33)-0.5)*6).toFixed(1)+'px)':'none';});};})();"""
+SLIDE_JS = """(function(){const prev=window.seekExtra;const eo=x=>1-Math.pow(1-Math.max(0,Math.min(1,x)),3);
+window.seekExtra=function(t){if(prev)prev(t);document.querySelectorAll('.sld').forEach(s=>{const e=eo((t-(+s.dataset.t0))/(+s.dataset.dur));
+s.style.transform=`translateY(${e*(+s.dataset.y)}px)`;s.querySelectorAll('.sldd').forEach(d=>{d.style.transform=`translateY(${e*(+d.dataset.dy)}px)`;});});};})();
+"""
+PANEL_JS = """(function(){const prev=window.seekExtra;const eo=x=>1-Math.pow(1-Math.max(0,Math.min(1,x)),3);
+window.seekExtra=function(t){if(prev)prev(t);document.querySelectorAll('.pnl').forEach(p=>{const ks=JSON.parse(p.dataset.keys);const a0=JSON.parse(p.dataset.box);const r0=+p.dataset.radius;
+let box=a0,k=0;for(const key of ks){const r=t-key.t0;if(r<0)break;const g=key.gd,h=key.hold,b=key.bd;
+if(r<g)k=eo(r/g);else if(r<g+h)k=1;else if(b>0&&r<g+h+b)k=1-eo((r-g-h)/b);else k=b>0?0:1;
+box=a0.map((v,i)=>v+(key.to[i]-v)*k);}
+p.style.left=box[0].toFixed(1)+'px';p.style.top=box[1].toFixed(1)+'px';p.style.width=box[2].toFixed(1)+'px';p.style.height=box[3].toFixed(1)+'px';
+const rr=(r0*(1-k)).toFixed(1)+'px';p.style.borderRadius=rr+' '+rr+' 0 0';
+p.querySelectorAll('.scr[data-sb]').forEach(sc=>{const sb=+sc.dataset.sb,t0=+sc.dataset.t0,gd=+sc.dataset.gd;const q=t<t0?0:eo((t-t0)/gd);sc.style.transform='translateY('+(sb*q).toFixed(1)+'px)';});});};})();"""
+COMMENT_JS = """(function(){const prev=window.seekExtra;window.seekExtra=function(t){if(prev)prev(t);
+document.querySelectorAll('.cm .cur').forEach(c=>{const t0=+c.dataset.t0;c.style.opacity=(t<t0||Math.floor((t-t0)*2.5)%2===0)?1:0;});};})();"""
 SEQ_JS = """(function(){const prev=window.seekExtra;window.seekExtra=function(t){if(prev)prev(t);
+document.querySelectorAll('.cnt').forEach(c=>{const t0=+c.dataset.t0,d=+c.dataset.cdur,a=+c.dataset.from,b=+c.dataset.to;let k=(t-t0)/d;if(k<0)k=0;if(k>1)k=1;k=1-Math.pow(1-k,3);
+const v=Math.round(a+(b-a)*k);c.querySelector('.num').textContent=v.toString().replace(/\\B(?=(\\d{3})+(?!\\d))/g,'\\u2009');});
 document.querySelectorAll('.seq').forEach(q=>{const t0=+q.dataset.t0,fps=+q.dataset.fps,n=+q.dataset.n;
 let i=Math.floor((t-t0)*fps+1e-6);if(i<0)i=0;if(i>n-1)i=n-1;
 q.querySelectorAll('img.sf').forEach(im=>im.classList.toggle('on',+im.dataset.fi===i));});};})();"""
@@ -668,16 +940,21 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
     css_href = css_href or (SCRIPTS / 'shorts' / 'shorts.css').as_uri()
     anim_href = anim_href or (SCRIPTS / 'graphics' / 'html' / 'anim.js').as_uri()
     o = [f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="{css_href}"><script src="{anim_href}"></script>',
-         f'<style>{CSS}</style><script>{SEQ_JS}</script></head><body>']
+         f'<style>{CSS}{fx.css(ACCENT, TEXT)}{GLITCH_CSS.replace("ACC", ACCENT)}</style><script>{SEQ_JS}{SLIDE_JS}{PANEL_JS}{COMMENT_JS}{GLITCH_JS}</script></head><body>']
     events = []
     secs = {s['id']: s for s in pl['sections']}
     for si, sec in enumerate(spec['sections']):
         sp = secs[sec['id']]; s_in, s_out = sp['out_in'], sp['out_out']
+        mark = len(o)
+        sld = sec.get('slide_down')   # {y, dur, dev_to_y}: grid+phone slide down as one block into the next section's lower half (5/нейрокреатор)
+        s_ext = pl['sections'][si + 1]['out_out'] if sld and si + 1 < len(pl['sections']) else s_out
         words = [w for w in pl['words'] if w['section'] == sec['id']]
         ang = ANGLES.get(sp['angle'] or '', ANGLES[DEFAULT_ANGLE])
         accents = sec.get('accents') or []
         fixes = sec.get('caption_fix')
-        if si: events.append(('whoosh', s_in))
+        if si and sec.get('whoosh_in', True): events.append(('whoosh', s_in))   # section "whoosh_in": false — no hit on the cut (reel 3 v2: the panel's way back is silent)
+        for e in sec.get('sfx_at') or []:      # manual hits: [{kind, t}] seconds from the section start (output time)
+            events.append((e.get('kind', 'tick'), s_in + float(e['t'])))
         if sec.get('clip'): continue          # the clip carries its own graphics and sound
         if sec.get('hook_text'):
             t_out = word_time(pl, sec['id'], sec['hook_until_word'], s_in, 'raise') if sec.get('hook_until_word') else s_out
@@ -704,11 +981,13 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
             if sec.get('pin_title'):             # a term that stays on screen above the scheme once it is spoken
                 pt = sec['pin_title']
                 t = word_time(pl, sec['id'], pt['at_word'], s_in, 'raise')
-                o.append(_el('rl pin', t, s_out, fx='pop', dur=0.3, ofx='fade', odur=0.15, style=f'top:{pt.get("y", 300)}px;'))
+                o.append(_el('rl pin', t, s_out, fx='pop', dur=float(pt.get('dur', 0.3)), ofx='fade', odur=0.15, style=f'top:{pt.get("y", 300)}px;'))
                 for li, ln in enumerate(pt['lines']):
-                    o.append(f'<div class="ln" data-in="{t + li * 0.08:.3f}" data-fx="slide-up" data-dist="40" data-dur="0.2">{_html.escape(ln)}</div>')
+                    fs = f' style="font-size:{int(pt["size"])}px"' if pt.get('size') else ''
+                    o.append(f'<div class="ln" data-in="{t + li * 0.08:.3f}" data-fx="slide-up" data-dist="40" data-dur="{float(pt.get("dur", 0.3)) * 0.7:.2f}"{fs}>{_html.escape(ln)}</div>')
                 o.append('</div>'); events.append(('tick', t))
             for kind, t in scheme.events(card):
+                if sec.get('scheme_sfx') == 'numbers': break      # no tick on the node pops, no whoosh on the pans
                 events.append(('tick' if kind == 'node' else 'whoosh', t))
             for n in card['nodes']:
                 for ph in n['phrases']:
@@ -730,21 +1009,63 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
             m_in = min(word_time(pl, sec['id'], m['at_word'], s_in, 'raise') for m in sec['memes'])
             m_out = word_time(pl, sec['id'], sec['memes_out_word'], s_in, 'raise') if sec.get('memes_out_word') else s_out
             skip.append((m_in, m_out))
-        if sp['camera']:
-            o.append(caption_html(cap_words, fixes, accents, sec.get('cap_y', ang['cap_y']), s_out, box=sec.get('cap_box') or ang.get('cap_box'),
-                                  skip=skip, size=sec.get('cap_size')))
+        if spec.get('no_captions'): pass   # rough cut: no captions at all
+        elif (sp['camera'] or sec.get('captions')) and sec.get('cap_zones'):   # [{from_word?, to_word?, y}]: caption height per time zone
+            for z in sec['cap_zones']:
+                z0 = word_time(pl, sec['id'], z['from_word'], s_in, 'raise') if z.get('from_word') else s_in
+                z1 = word_time(pl, sec['id'], z['to_word'], z0, 'raise') if z.get('to_word') else s_out
+                zw = [w for w in cap_words if z0 - 1e-6 <= w['start'] < z1 - 1e-6]
+                if zw: o.append(caption_html(zw, fixes, accents, int(z['y']), z1, box=sec.get('cap_box') or ang.get('cap_box'), skip=skip, size=sec.get('cap_size')))
+        elif sp['camera'] or sec.get('captions'):
+            cap_end = s_out
+            if sec.get('panel'):           # the panel fills the screen during the section's hold: the last phrase ends with the speech
+                cap_end = max([p_['out_out'] for p_ in pl['pieces'] if p_['section'] == sec['id'] and not p_.get('silent')] or [s_out])
+            o.append(caption_html(cap_words, fixes, accents, sec.get('cap_y', ang['cap_y']), cap_end, box=sec.get('cap_box') or ang.get('cap_box'),
+                                  skip=skip, size=sec.get('cap_size'), acc_color=sec.get('accent_color')))
         if sec.get('device'):
             d = sec['device']
             t = word_time(pl, sec['id'], d['at_word'], s_in, 'raise')
-            t_out = word_time(pl, sec['id'], d['out_word'], t, 'raise') if d.get('out_word') else s_out
-            o.append(device_html(d, t, t_out, base)); events.append(('whoosh', t))
+            t_out = word_time(pl, sec['id'], d['out_word'], t, 'raise') if d.get('out_word') else s_ext
+            for sc in d.get('screens') or []:
+                sc['_t_in'] = word_time(pl, sec['id'], sc['at_word'], s_in, 'raise') if sc.get('at_word') else t
+                sc['_t_out'] = word_time(pl, sec['id'], sc['out_word'], sc['_t_in'], 'raise') if sc.get('out_word') else t_out
+                if sc['_t_in'] > t: events.append(('tick', sc['_t_in']))
+            dh = device_html(d, t, t_out, base)
+            if sld: dh = f'<div class="sldd" data-dy="{int(sld.get("dev_to_y", 1020)) - int(d.get("y", 600)) - int(sld.get("y", H // 2))}">{dh}</div>'
+            o.append(dh); events.append(('whoosh', t))
+        if sec.get('comment'):             # Instagram comment scene (camera null): typing, send, DM bubble, line — comment_html
+            frag, ev = comment_html(sec['comment'], s_in, s_out, lambda name: word_time(pl, sec['id'], name, s_in, 'raise'), base)
+            o.append(frag); events += ev
+        if sec.get('panel'):               # split: camera band (cam_split) + screencast panel growing to full screen after the phrase
+            spoken = [p_['out_out'] for p_ in pl['pieces'] if p_['section'] == sec['id'] and not p_.get('silent')]
+            frag, ev = panel_html(sec['panel'], s_in, s_out, max(spoken) if spoken else s_out, base)
+            o.append(frag); events += ev
+        for v in sec.get('videos') or []:
+            t = word_time(pl, sec['id'], v['at_word'], s_in, 'raise') if v.get('at_word') else s_in
+            t_out = word_time(pl, sec['id'], v['out_word'], t, 'raise') if v.get('out_word') else s_out
+            if v.get('backdrop'):          # dim the camera under a grid of cards (reference: remakes grid on a dark frame)
+                o.append(f'<div class="vbd" data-in="{t:.3f}" data-out="{t_out:.3f}" data-fx="fade" data-dur="0.2" data-ofx="fade" data-odur="0.2"></div>')
+            o.append(video_html(v, t, t_out, base)); events.append(('whoosh', t))
+        for c in sec.get('counters') or []:   # {at_word, from, to, dur, x, y, label, out_word?}: a view counter running up (reference hook: 17 631 -> 1 200 000)
+            t = word_time(pl, sec['id'], c['at_word'], s_in, 'raise') if c.get('at_word') else s_in
+            t_out = word_time(pl, sec['id'], c['out_word'], t, 'raise') if c.get('out_word') else s_out
+            o.append(f'<div class="cnt" data-in="{t:.3f}" data-out="{t_out:.3f}" data-fx="pop" data-dur="0.2" data-ofx="fade" data-odur="0.15" '
+                     f'data-t0="{t:.3f}" data-cdur="{float(c.get("dur", 1.2)):.3f}" data-from="{int(c.get("from", 0))}" data-to="{int(c["to"])}" '
+                     f'style="left:{int(c.get("x", 40))}px;top:{int(c.get("y", 60))}px;text-align:{c.get("align", "left")}"><div class="num">{int(c.get("from", 0))}</div>'
+                     f'<div class="lbl">{_html.escape(c.get("label", ""))}</div></div>')
+            events.append(('tick', t))
+        for fi, f in enumerate(sec.get('fx') or []):     # fx.py: grid_bg / connect / limits (times at the spoken words)
+            wt = lambda name: word_time(pl, sec['id'], name, s_in, 'raise')
+            frag, ev = fx.html(f, wt, s_in, s_ext, base, f'{sec["id"]}_{fi}')
+            o.append(frag); events += ev
         for i, im in enumerate(sec.get('images') or []):
             t = word_time(pl, sec['id'], im['at_word'], s_in, 'raise')
             t_out = word_time(pl, sec['id'], im['out_word'], t, 'raise') if im.get('out_word') else s_out
             slots = ang.get('images') or [(W // 2 - 210, 760)]
             dx, dy = slots[i % len(slots)]
             x, y, w, h = im.get('x', dx), im.get('y', dy), im.get('w', 420), im.get('h', 300)
-            o.append(image_html(im['src'], t, t_out, x, y, w, h, base)); events.append(('tick', t))
+            o.append(image_html(im['src'], t, t_out, x, y, w, h, base, fx=im.get('fx', 'slide-up'), dur=float(im.get('dur', 0.5 if im.get('fx', 'slide-up') != 'pop' else 0.3)), ofx=im.get('ofx', 'fade'), odur=float(im.get('odur', 0.35))))
+            events.append((im.get('sfx', 'tick'), t))        # sfx: 'tick' | 'pop' | 'whoosh' | 'none'
         last = -9.0
         for i, stk in enumerate(sec.get('stickers') or []):
             t = word_time(pl, sec['id'], stk['at_word'], s_in); x, y = ang['stickers'][i % len(ang['stickers'])]
@@ -762,8 +1083,11 @@ def gfx_html(pl, spec, css_href=None, anim_href=None, base=None):
                 events.append(('tick', t))
         if sec.get('cta_word'):
             t = word_time(pl, sec['id'], sec['cta_word'], s_in, 'raise')
-            o.append(f'<div class="rl cta" data-in="{t:.3f}" data-fx="pop" data-dur="0.25" style="top:{ang.get("cta_y", 1500)}px">{_html.escape(sec.get("cta_big") or sec["cta_word"].upper())}</div>')
+            o.append(f'<div class="rl cta" data-in="{t:.3f}" data-fx="pop" data-dur="0.25" style="top:{sec.get("cta_y", ang.get("cta_y", 1500))}px{(";color:" + sec["accent_color"] + ";text-shadow:0 0 36px " + sec["accent_color"] + "AA, 0 0 90px " + sec["accent_color"] + "55, 0 6px 16px rgba(0,0,0,.5)") if sec.get("accent_color") else ""}">{_html.escape(sec.get("cta_big") or sec["cta_word"].upper())}</div>')
             events.append(('tick', t))
+        if sld:
+            o.insert(mark, f'<div class="sld" data-t0="{s_out:.3f}" data-dur="{float(sld.get("dur", 0.5)):.3f}" data-y="{int(sld.get("y", H // 2))}">')
+            o.append('</div>')
     if pl.get('end_dur'):      # last in the DOM: the dim covers every section element (the big CTA word included)
         o.append(end_html(spec.get('_mode', 'reels'), spec.get('_mode_blk') or {}, pl['speech_end'], base)); events.append(('whoosh', pl['speech_end']))
     o.append('</body></html>')
@@ -934,11 +1258,31 @@ def piece_video(p, base, cube, out, zooms=(), statics=None):
     n = fr(p['dur'])
     if p.get('clip'):
         cmd = ['ffmpeg', '-v', 'error', '-y', '-i', str((statics or {}).get(('spec_base', 0), base) / p['clip']),
-               '-vf', f"fps={FPS},scale={W}:{H}:flags=lanczos,setsar=1,format=yuv420p"]
+               '-vf', f"setpts=PTS/{p.get('clip_speed', 1.0):.6f},fps={FPS},scale={W}:{H}:flags=lanczos,setsar=1,format=yuv420p"]
+    elif p.get('broll'):                     # cut from the pre-rendered section video (broll_video)
+        sec_in = (statics or {}).get(('sec_in', p['broll']), 0.0)
+        cmd = ['ffmpeg', '-v', 'error', '-y', '-ss', f"{p['out_in'] - sec_in:.6f}", '-i', str(out.parent / f"broll_{p['broll']}.mp4"),
+               '-vf', f"fps={FPS},tpad=stop_mode=clone:stop_duration=1"]
     elif p['camera']:
         src = base / p['camera']
         fe = (statics or {}).get(('fisheye', p['section']))
-        pre = f"setpts=PTS/{p['speed']:.6f},{camlut(cube)},{build_render.TOYUV},fps={FPS},scale={W}:{H}:flags=lanczos,setsar=1"
+        ccx = float((statics or {}).get(('cam_cx', p['section']), 0.5))   # landscape camera: cover + crop around cam_cx (section key), vertical: no-op
+        pre = (f"setpts=PTS/{p['speed']:.6f},{camlut(cube)},{build_render.TOYUV},fps={FPS},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
+               f"crop={W}:{H}:x='(iw-{W})*{ccx:.3f}':y=0,setsar=1")
+        spl = (statics or {}).get(('cam_split', p['section']))   # section "cam_split": {h, y, cy} — the camera in a band (reference: reel on top, camera below)
+        if spl:
+            bh, by, bcy = int(spl.get('h', H // 2)), int(spl.get('y', H // 2)), float(spl.get('cy', 0.5))
+            sc = float(spl.get('scale', 1.0))
+            if sc < 1.0:   # the whole head must fit the band (user, reel 2): shrink the camera, blurred copy fills the sides
+                sw, sh = int(W * sc) // 2 * 2, int(H * sc) // 2 * 2
+                pre += (f",split[c0][c1];[c0]crop={W}:{bh}:x=0:y='(ih-{bh})*{bcy:.3f}',gblur=sigma=40,eq=brightness=-0.25[bg];"
+                        f"[c1]scale={sw}:{sh}:flags=lanczos,crop={sw}:{bh}:x=0:y='(ih-{bh})*{bcy:.3f}'[fg];[bg][fg]overlay=x={(W - sw) // 2}:y=0")
+            else:
+                pre += f",crop={W}:{bh}:x=0:y='(ih-{bh})*{bcy:.3f}'"
+            pre += f",pad={W}:{H}:0:{by}:black"
+        if (statics or {}).get(('cam_letterbox', p['section'])):   # landscape camera full width, black bars (user: «горизонтальная вариация рилса»)
+            pre = (f"setpts=PTS/{p['speed']:.6f},{camlut(cube)},{build_render.TOYUV},fps={FPS},scale={W}:-2:flags=lanczos,"
+                   f"pad={W}:{H}:0:(oh-ih)/2:black,setsar=1")
         cmd = ['ffmpeg', '-v', 'error', '-y', '-ss', f"{p['cam_in']:.6f}", '-t', f"{p['dur'] * p['speed'] + 0.5:.6f}", '-i', str(src)]
         if fe:                                   # section "fisheye": peephole (peephole.py) + blurred fill, then the zoom
             mx, my, mm = peephole.build(out.parent, fe.get('alpha', 140), fe.get('rmax', 760))
@@ -958,7 +1302,7 @@ def piece_audio(p, base, out, denoise=False):
     """Raw mic piece at speed 1 (the whole voice is sped once by rubberband after the concat). denoise: section
     "denoise" (far / noisy take, 14/hook: noise floor −46 dB vs −83 on the other takes) -> afftdn."""
     d = p['src_out'] - p['src_in']
-    if p.get('clip'):                       # the clip's sound goes into the mix as its own track; the voice lane gets silence
+    if p.get('clip') or p.get('silent'):    # the clip's sound goes into the mix as its own track; the voice lane gets silence
         run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'anullsrc=r=48000:cl=mono', '-t', f'{d:.6f}', '-c:a', 'pcm_f32le', str(out)])
         return
     dn = (denoise + ',') if isinstance(denoise, str) else ('afftdn=nf=-32:nr=14,' if denoise else '')   # str = custom filter chain (section "voice_fx")
@@ -999,7 +1343,7 @@ def build_media(pl, spec, base, wd, cube):
         if p.get('clip'):
             if not (base / p['clip']).is_file(): raise SystemExit(f'нет клипа: {base / p["clip"]}')
             continue
-        if p['camera'] and not (vdir / p['camera']).is_file(): raise SystemExit(f'нет камеры: {vdir / p["camera"]}')
+        if p['camera'] and not p.get('broll') and not (vdir / p['camera']).is_file(): raise SystemExit(f'нет камеры: {vdir / p["camera"]}')
         if not (adir / p['src']).is_file(): raise SystemExit(f'нет голоса: {adir / p["src"]}')
     t = time.time()
     with ThreadPoolExecutor(4) as ex:
@@ -1009,8 +1353,14 @@ def build_media(pl, spec, base, wd, cube):
     run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(wd / 'audio.txt'), '-c', 'copy', str(wd / 'voice_src.wav')])
     level_sections(pl, wd)
     T = pl['total']
-    run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'voice_src.wav'), '-af',
-         f"atempo={pl['speed']:.4f},apad,atrim=end={T:.6f}", '-c:a', 'pcm_f32le', str(wd / 'voice_raw.wav')])
+    # speed per piece (section "speed" / clip_speed): atrim each piece of voice_src, atempo by its own factor, concat
+    chain, t0, labels = [], 0.0, []
+    for i, p in enumerate(pl['pieces']):
+        d = p['src_out'] - p['src_in']; f = d / p['dur'] if p['dur'] > 0 else 1.0
+        chain.append(f"[0:a]atrim=start={t0:.6f}:end={t0 + d:.6f},asetpts=PTS-STARTPTS,atempo={max(0.5, min(f, 100.0)):.5f}[p{i}]"); labels.append(f'[p{i}]')
+        t0 += d
+    fc = ';'.join(chain) + ';' + ''.join(labels) + f"concat=n={len(labels)}:v=0:a=1,apad,atrim=end={T:.6f}[a]"
+    run(['ffmpeg', '-v', 'error', '-y', '-i', str(wd / 'voice_src.wav'), '-filter_complex', fc, '-map', '[a]', '-c:a', 'pcm_f32le', str(wd / 'voice_raw.wav')])
     print(f'  голос: {len(pl["pieces"])} кусков, x{pl["speed"]}, {T:.2f} с ({time.time() - t:.0f} с)')
     t = time.time()
     with ThreadPoolExecutor(3) as ex:
@@ -1018,6 +1368,13 @@ def build_media(pl, spec, base, wd, cube):
         statics = static_keys(pl, spec); statics[('base', 0)] = vdir; statics[('spec_base', 0)] = base
         for sec in spec['sections']:
             if sec.get('fisheye'): statics[('fisheye', sec['id'])] = sec['fisheye']
+            if sec.get('cam_cx') is not None: statics[('cam_cx', sec['id'])] = sec['cam_cx']
+            if sec.get('cam_split'): statics[('cam_split', sec['id'])] = sec['cam_split']
+            if sec.get('cam_letterbox'): statics[('cam_letterbox', sec['id'])] = True
+        for s_ in pl['sections']:
+            if s_.get('broll'):
+                statics[('sec_in', s_['id'])] = s_['out_in']
+                broll_video(s_['broll'], vdir, cube, pdir / f"broll_{s_['id']}.mp4")
         list(ex.map(lambda p: piece_video(p, vdir, cube, pdir / f"v{p['idx']:03d}.mp4", zooms, statics), pl['pieces']))
     build_render.concat_list(wd / 'video.txt', [pdir / f"v{p['idx']:03d}.mp4" for p in pl['pieces']])
     if pl.get('end_dur'):       # the card sits on the dimmed, frozen last frame
@@ -1075,12 +1432,13 @@ def mix(pl, spec, base, wd, events):
         ins += ['-i', str(cf)]; k = ins.count('-i') - 1
         gc = prof['voice_lufs'] + float(sec.get('clip_lu', 0)) - measure(cf)['I']
         t0 = int(round(p['out_in'] * 1000))
-        parts.append(f"[{k}:a]aformat=channel_layouts=stereo:sample_rates=48000,atrim=end={p['dur']:.3f},volume={gc:.2f}dB,adelay={t0}|{t0}[clip{p['idx']}]")
+        at = f"atempo={p['clip_speed']:.4f}," if p.get('clip_speed', 1.0) != 1.0 else ''
+        parts.append(f"[{k}:a]aformat=channel_layouts=stereo:sample_rates=48000,{at}atrim=end={p['dur']:.3f},volume={gc:.2f}dB,adelay={t0}|{t0}[clip{p['idx']}]")
         labels.append(f"[clip{p['idx']}]")
         print(f"  клип {p['clip']}: {gc:+.1f} dB")
     sfx = spec.get('sfx') or {}
     n_hits = {}
-    for kind in ('tick', 'whoosh'):
+    for kind in ('tick', 'whoosh', 'pop'):
         f = sfx.get(kind)
         hits = [t for k_, t in events if k_ == kind and 0 <= t < T - 0.05]
         if not f or not hits:
@@ -1156,7 +1514,7 @@ def main(argv=None):
     spec = json.loads(sp.read_text(encoding='utf-8'))
     apply_palette(spec)
     blk = apply_mode(spec, mode)
-    spec['_mode'], spec['_mode_blk'], spec['_end_dur'] = mode, blk, END_DUR[mode]
+    spec['_mode'], spec['_mode_blk'], spec['_end_dur'] = mode, blk, float(blk.get('end_dur', END_DUR[mode]))   # block: end_dur, max override the defaults
     if mode != 'reels':
         spec['out'] = f"out/{mode}/{spec['id']}.mp4"; spec['id'] = f"{spec['id']}_{mode}"
     wd = base / 'work' / spec['id']; wd.mkdir(parents=True, exist_ok=True)
@@ -1171,8 +1529,9 @@ def main(argv=None):
     print(f"план: {len(pl['pieces'])} кусков, {len(pl['words'])} слов, {pl['total']:.2f} с; SFX {len(events)}; {wd / 'gfx.html'}")
     for s in pl['sections']:
         print(f"  {s['id']:8} {s['out_in']:6.2f}–{s['out_out']:6.2f}  {s['camera'] or '—':14} {s['angle'] or ''}  {s['n_words']} слов")
-    if pl['total'] > LIMIT[mode] + 1e-6:
-        raise SystemExit(f"{mode}: {pl['total']:.2f} с > лимита {LIMIT[mode]:.0f} с (с карточкой) — сузить \"{mode}\".sections в спеке")
+    lim = float(blk.get('max', LIMIT[mode]))
+    if pl['total'] > lim + 1e-6:
+        raise SystemExit(f"{mode}: {pl['total']:.2f} с > лимита {lim:.0f} с (с карточкой) — сузить \"{mode}\".sections в спеке или задать \"max\"")
     if a.plan: return
     cube = cam_lut.REF_CUBE
     if not a.gfx_only:

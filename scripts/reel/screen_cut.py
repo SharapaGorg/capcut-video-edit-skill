@@ -2,7 +2,7 @@
 
 Spec json: {"src": "UBKT7676.MP4", "out": "work/screen_cut.mp4", "fps": 30, "xfade": 0.15,
             "segments": [{"in": 3.0, "out": 7.0, "speed": 4}, {"in": 8.0, "out": 9.1}, ...]}
-Every segment is cut from src, sped up by `speed` (typing at 3-4x, results in real time), segments are joined with
+Every segment is cut from src (or its own `src`), sped up by `speed` (typing at 3-4x, results in real time), segments are joined with
 a crossfade of `xfade` s (0 = hard cut). The result has no audio, keeps the source size.
 Usage: python screen_cut.py spec.json
 """
@@ -26,7 +26,7 @@ def build(spec, base):
     ins, fc, durs = [], [], []
     for i, s in enumerate(segs):
         sp = float(s.get('speed', 1)); d = (s['out'] - s['in']) / sp; durs.append(d)
-        ins += ['-ss', f"{s['in']:.3f}", '-to', f"{s['out']:.3f}", '-i', str(src)]
+        ins += ['-ss', f"{s['in']:.3f}", '-to', f"{s['out']:.3f}", '-i', str(base / s['src'] if s.get('src') else src)]
         fc.append(f'[{i}:v]setpts=PTS/{sp:.4f},fps={fps},format=yuv420p,settb=AVTB[s{i}]')
     if len(segs) == 1 or xf <= 0:
         fc.append(''.join(f'[s{i}]' for i in range(len(segs))) + f'concat=n={len(segs)}:v=1:a=0[v]')

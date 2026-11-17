@@ -53,13 +53,14 @@ SPEC = {
 
 def test_cut_silences_only_long_gaps():
     ws = WORDS['a.m4a']
-    pieces = br.cut_silences(ws, 1.9, 9.0)
+    segs = [(w['start'], w['end']) for w in ws]               # cut_silences takes speech segments (by energy)
+    pieces = br.cut_silences(segs, 1.9, 9.0)
     assert len(pieces) == 2                                   # the one 1.0-s pause (after «Егор,»)
     (a0, b0), (a1, b1) = pieces
     assert a0 == 1.9 and b1 == 9.0
     assert b0 - ws[5]['end'] == pytest.approx(0.425, abs=1e-3) and ws[6]['start'] - a1 == pytest.approx(0.425, abs=1e-3)
     assert a1 - b0 == pytest.approx(br.GAP_KEEP, abs=1e-3)
-    assert br.cut_silences(ws, 1.9, 5.0) == [(1.9, 5.0)]      # no gap > 0.35 inside -> one piece
+    assert br.cut_silences(segs, 1.9, 5.0) == [(1.9, 5.0)]      # no gap > 0.35 inside -> one piece
     assert br.cut_silences([], 0, 2) == [(0, 2)]
 
 
