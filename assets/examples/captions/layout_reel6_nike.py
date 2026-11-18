@@ -1,12 +1,20 @@
 """Reel 6 «Что общего между Nike, Роналду и Кайли Дженнер?» (29.4 s): standing hook → 18 s without camera (dark grid:
 full-screen typographic scenes) → close-up CTA with a hand mic."""
-import sys
+import sys, subprocess
+from pathlib import Path
 from kit import Layout
 
 L = Layout(sys.argv[1])
 F, w, front, back = L.F, L.w, L.front, L.back
 c1, c2, c3, c4, END = 87, 222, 632, 883, L.n
 # hook | intro (grid) | tips (grid) | cta | end card. 632 = the grid fades out over 4 frames; 883 = the 2.2 s tail added with extend.py
+ASSETS = Path(__file__).parent.parent / "assets"
+def card(img, f, f_out, x, y, width=330, rot=0, pad=0, bg="#fff"):
+    """photo card (white frame, tilted) over the speaker: the brand's real logo / the person's photo on their name"""
+    front.append(f'<div class="a" data-in="{f}" data-out="{f_out}" data-fx="pop" style="position:absolute;left:{x}px;top:{y}px;width:{width}px">'
+                 f'<div style="transform:rotate({rot}deg);background:#fff;padding:12px;border-radius:22px;box-shadow:0 18px 50px rgba(0,0,0,.5)">'
+                 f'<div style="aspect-ratio:4/5;border-radius:12px;overflow:hidden;background:{bg};display:flex;align-items:center;justify-content:center">'
+                 f'<img style="display:block;width:{100 - pad * 2}%;{"height:100%;object-fit:cover" if not pad else ""}" src="{(ASSETS / img).as_uri()}"></div></div></div>')
 MONO = f"font-family:'JetBrains Mono';font-weight:600;font-size:44px;color:{L.orange};letter-spacing:.04em;text-shadow:0 2px 8px rgba(0,0,0,.6)"
 
 # ── hook: the question on the wall, two names behind the head, the third one as the silhouette beat
@@ -22,7 +30,10 @@ L.group(back, 150, c1, [w("и", fs, "sans ink", fx="cut", style="font-size:80px"
 L.ribbon(front, fs + 4, c1, "M 1180 1260 C 900 1400, 600 1290, 320 1470 S -40 1730, -140 1640", reverse=True)
 L.eyes(fs + 2, c1, devil=True)
 L.devil(fs + 3, c1, size=1.15, tail=(650, 1540, 1.35))             # the user asked for «more devilish» here
-for s in [("accent", F(1), -8), ("impact", F(3), -10), ("thump", F(3), -13), ("thump", F(4), -14), ("snap", F(4), -12),
+card("nike.svg", F(3), c1, 36, 1100, 340, rot=-7, pad=12)
+card("ronaldo.jpg", F(4), c1, 704, 1130, 340, rot=6)
+card("kylie.jpg", fs, c1, 350, 1190, 380, rot=-3)
+for s in [("swish2", F(3), -11), ("swish2", F(4), -11), ("accent", F(1), -8), ("impact", F(3), -10), ("thump", F(3), -13), ("thump", F(4), -14), ("snap", F(4), -12),
           ("riser", fs, -10), ("impact", fs, -8), ("shutter", fs, -10), ("swish2", fs, -12), ("blip", fs + 2, -11), ("swish2", fs + 4, -12),
           ("doom", fs, -15), ("glitch", fs + 3, -13)]: L.sfx(*s)
 
@@ -47,44 +58,22 @@ L.group(front, 600, b, [w("итак,", max(F(20), c2), "serif", style="font-size
 L.big(front, "начнём", F(21), b, 820, top=880, cls="acc")
 L.sfx("swish1", F(20), -10); L.sfx("impact2", F(21), -9); L.sfx("shutter", F(21), -10)
 
-# «Забудьте про лучший день недели для постинга. Кажется, это не работает»
-c = F(33)
-dead = F(31)
-L.group(front, 400, c, [w("забудьте", b, "sans") + w("про", F(23), "sans"),
-                        w("лучший", F(24), "serif acc", style="font-size:146px") + w("день", F(25), "serif acc", style="font-size:146px")], style="line-height:1.15")
-L.group(front, 790, c, [L.struck(L.tiles(["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"], F(26), c, pick=2, f_hot=F(26) + 8, f_dead=dead), F(32), c)])
-L.group(front, 1000, F(29), [w("для", F(27), "sans") + w("постинга", F(28), "sans")])
-L.group(front, 1000, c, [w("кажется,", F(29), "sans") + w("это", F(30), "sans"),
-                         w("не", F(31), "serif", style="font-size:150px") + w("работает", F(32), "serif", style="font-size:150px")], style="line-height:1.15")
-for s in [("accent", F(24), -7), ("tact", F(26), -7), ("ui", F(26) + 8, -5), ("swish2", F(32), -8), ("thump", F(32), -13)]: L.sfx(*s)
-
-# «А, ну и да, про время тоже»
-d = F(40)
-L.group(front, 400, d, [w("а,", c, "sans") + w("ну", F(34), "sans") + w("и", F(35), "sans") + w("да,", F(36), "sans")])
-L.clock(560, F(37), d, size=360, speed=34)
-L.group(front, 980, d, [L.struck(w("про", F(37), "serif", style="font-size:170px") + w("время", F(38), "serif acc", style="font-size:170px"), F(39) + 2, d),
-                        w("тоже", F(39), "sans")], style="line-height:1.2")
-L.sfx("counter", F(37), -11); L.sfx("swish2", F(39) + 2, -8)
-
-# «Главное, не постите ночью»
-e = F(44)
-L.group(front, 420, e, [w("главное,", d, "serif", style="font-size:150px"), w("не", F(41), "sans") + w("постите", F(42), "sans")], style="line-height:1.3")
-L.big(front, "ночью", F(43), e, 840, top=800, cls="acc")
-L.group(front, 1130, e, [f'<span class="w a" data-in="{F(43) + 4}" data-fx="word" style="{MONO};font-size:76px;color:{L.cream}">00:00 — 06:00</span>'])
-L.sfx("accent", d, -8); L.sfx("impact2", F(43), -9); L.sfx("shutter", F(43), -10)
-
-# «У всех есть всплески охватов во время праздников, а также инфоповодов»
-g = F(55)
-L.group(front, 310, g, [w("у", e, "sans") + w("всех", F(45), "sans") + w("есть", F(46), "sans"),
-                        w("всплески", F(47), "serif acc", style="font-size:200px;line-height:1.05"), w("охватов", F(48), "sans")], style="line-height:1.12")
-P = [(0, .12), (.08, .2), (.15, .1), (.21, .24), (.28, .95), (.35, .16), (.44, .26), (.52, .12), (.6, .22), (.68, .3), (.76, 1.0), (.84, .2), (.92, .3), (1, .18)]
-box = dict(x=110, y=960, width=860, height=400)
-p1 = L.chart(F(48), g, P[:6], dur=F(51) - F(48) + 2, **box)
-x0, wd = 110 + .35 * 860, 860 * .65
-p2 = L.chart(F(52) - 4, g, [((a_ - .35) / .65, b_) for a_, b_ in P[5:]], dur=F(54) - F(52) + 6, x=round(x0), y=960, width=round(wd), height=400, axis=False)
-L.group(front, 880, g, [w("праздники", F(51), "sans", style="font-size:60px")], x=p1[4][0] - 250, width=500)
-L.group(front, 860, g, [w("инфоповоды", F(54), "sans", style="font-size:60px")], x=p2[5][0] - 250, width=500)
-for s in [("accent", F(47), -7), ("swish1", F(48), -10), ("snap", F(51), -10), ("swish1", F(52) - 4, -11), ("snap", F(54), -10)]: L.sfx(*s)
+# ── v5 (2026-11-18): the three tips are FOOTAGE SCENES now — the real reels from ../footage instead of day tiles / clock / chart.
+# Built by auto/scenes/scene{1,2,3}.py (engine.py: footage frames + HTML motion graphics + glitch post, drawn over the base frames
+# of this very render, so the grid matches); here their frames become the picture of those frames (L.plate), with their sounds.
+#   scene1 250–352 «забудьте про лучший день…»: two Messi reels, both on Wednesday, 1,47 млрд vs 21,3 млн -> 69×
+#   scene2 352–430 «про время тоже / не постите ночью»: Nike 19:01 (135 млн) vs 19:02 (2,2 млн) -> 61×
+#   scene3 430–535 «всплески… инфоповоды»: NASA Artemis II splashdown 12,6× -> Nike Brazil women 19,6× (to the account median)
+# Edit a scene: change scenes/sceneN.py, `python -X utf8 sceneN.py` there, then `run.py <auto> render --range <f0>,<f1>`.
+c, d, e, g = F(33), F(40), F(44), F(55)
+sys.path.insert(0, str(Path(__file__).parent.parent / "scenes"))
+import scene1, scene2, scene3
+for m in (scene1, scene2, scene3):
+    sc = m.build()
+    files = sorted((Path(__file__).parent.parent / "scenes" / "out" / sc.name).glob("*.jpg"))
+    assert len(files) == sc.f1 - sc.f0, f"{sc.name}: render the scene first ({len(files)} frames)"
+    L.plate(sc.f0, files)
+    for s in sc.sfx: L.sfx(*s)
 
 # «Всегда будьте начеку»
 i = F(59)
@@ -100,27 +89,67 @@ L.group(front, 430, c3, [w("а", i, "sans") + w("остальные", F(60), "sa
                          L.arrow(F(64) + 3, c3, size=150)], style="line-height:1.2")
 L.sfx("accent", F(61), -7); L.sfx("ding", F(64) + 3, -9)
 
-# ── cta: close-up, the head moves a lot → small lines on the chest, HUD on «анализ аккаунта», one big word at the end
+# ── cta: close-up. v3: from «сделать такой анализ аккаунта» the REAL mobile screencast of the account analysis (writelo.io landing,
+# 1080x2336) rides up full height over the speaker (the user allowed to cover the face); every item of the list shows ITS screen:
+# link pasted → «Разобрать», views chart with spikes, top reels, formats, code words. Words live in the black strip at the bottom
+# of the phone (it also hides the Safari toolbar with the staging address).
 Y = 1280
-TAG = f"font-family:'JetBrains Mono';font-weight:700;font-size:46px;color:#fff;background:{L.orange};padding:2px 14px 5px;border-radius:8px;vertical-align:.5em;margin-right:.35em"
+TAG = f"font-family:'JetBrains Mono';font-weight:700;font-size:40px;color:#fff;background:{L.orange};padding:2px 12px 4px;border-radius:8px;vertical-align:.35em;margin-right:.35em"
 num = lambda n, f: f'<span class="w a" data-in="{f}" data-fx="word" style="{TAG}">{n}</span>'
+SRC = ASSETS / "writelo_analysis_mobile.mp4"
+PW, PH, PT, STRIP = 940, 1430, 110, 240       # v4 (the user: «скринкаст чуть увеличишь»): the screen is 44 % bigger — almost the frame width,
+# so only a part of the phone screen fits by height: every piece shows ITS part (`top` = where the window starts, share of the source height)
+SH = round(2336 * PW / 1080 / 2) * 2           # source height after scaling to the window width
+def cast(name, t0, t1, f, f_out, top=0.0):
+    """real screencast, a new source frame on EVERY frame of the reel; window PW x PH cut from the scaled source at `top`"""
+    n = f_out - f
+    y = min(round(top * SH), SH - PH)
+    d = ASSETS / f"cast4_{name}_{n}_{round(t0 * 10)}_{round(t1 * 10)}_{y}"
+    if len(list(d.glob("*.jpg"))) != n:
+        d.mkdir(exist_ok=True)
+        for old in d.glob("*.jpg"): old.unlink()
+        fps = n / (t1 - t0)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t0), "-t", str(t1 - t0 + 0.2), "-i", str(SRC),
+                        "-vf", f"fps={fps:.4f},scale={PW}:{SH},crop={PW}:{PH}:0:{y}", "-frames:v", str(n), "-q:v", "3", str(d / "%04d.jpg")], check=True)
+    files = sorted(d.glob("*.jpg"))
+    return "".join(f'<img class="a" data-in="{f + k}" data-out="{f + k + 1}" data-fx="cut" style="position:absolute;inset:0;width:100%;height:100%" src="{files[min(k, len(files) - 1)].as_uri()}">'
+                   for k in range(n))
+def pphone(body, f, f_out):
+    x = (1080 - PW - 24) // 2
+    front.append(f'<div class="a" data-in="{f}" data-out="{f_out}" data-fx="pop" style="position:absolute;left:{x}px;top:{PT - 12}px;width:{PW + 24}px">'
+                 f'<div style="border-radius:54px;background:#0A0A0A;border:3px solid #3A3A3A;padding:9px;box-shadow:0 26px 70px rgba(0,0,0,.6)">'
+                 f'<div style="position:relative;height:{PH}px;border-radius:44px;overflow:hidden;background:#0A0A0A">{body}'
+                 f'<div style="position:absolute;left:0;right:0;bottom:0;height:{STRIP}px;background:#0A0A0A;border-top:2px solid #3A2A20"></div></div></div></div>')
+def cap(f_out, *lines):
+    y = PT + PH - STRIP + (72 if len(lines) == 1 else 16)
+    L.group(front, y, f_out, list(lines), x=(1080 - PW) // 2, width=PW, style="line-height:1.12")
+def cw(t, f, size=54, cls="sans", extra="", fx="word"): return w(t, f, cls, fx=fx, style=f"font-size:{size}px;{extra}")
+
 L.group(front, Y, F(66), [w("кстати,", c3 + 4, "serif", fx="cut", style="font-size:130px")])
 L.group(front, Y, F(69), [w("вы", F(66), "sans") + w("тоже", F(67), "sans") + w("можете", F(68), "sans")])
-L.group(front, Y, F(71), [w("сделать", F(69), "sans") + w("такой", F(70), "sans")])
-top = min(x["top"] for x in L.heads[F(71):F(73)] if x)       # the head bobs here: take its highest position, not the median
-L.big(back, "анализ", F(71), F(73), 900, head_top=top, ratio=0.7, cx=540)
-L.group(front, Y, F(73), [w("аккаунта", F(72), "serif acc", style="font-size:130px")])
-L.group(front, Y - 20, F(75), [num("01", F(73)) + w("охватные", F(73), "sans"), w("всплески", F(74), "serif acc", style="font-size:130px;line-height:1")], style="line-height:1.15")
-L.group(front, Y - 20, F(78), [num("02", F(75)) + w("топы‑", F(75), "serif acc", style="font-size:96px;margin-right:0") + w("антитопы", F(76), "serif", style="font-size:96px;margin-left:0"),
-                               w("роликов", F(77), "sans")], style="line-height:1.15")
-L.group(front, Y - 20, F(80), [num("03", F(78)) + w("повторяющиеся", F(78), "sans", style="font-size:80px"), w("форматы", F(79), "serif acc", style="font-size:130px;line-height:1")], style="line-height:1.15")
-L.group(front, Y - 20, F(82), [num("04", F(80)) + w("кодовые", F(80), "sans"), w("слова", F(81), "serif acc", style="font-size:130px;line-height:1")], style="line-height:1.15")
-L.group(front, Y + 30, F(85), [w("и", F(82), "sans") + w("так", F(83), "sans") + w("далее", F(84), "sans")])
+p0, p1 = F(69), F(85) - 6                    # phone: «сделать» … till the address starts typing
+i1, i2, i3, i4, i5 = F(73), F(75), F(78), F(80), F(82)
+# source (s): 1.3–3.3 link pasted and «Разобрать» tapped · 3.4–4.4 progress steps · 4.4–6.6 report opens, top reels (+28×) ·
+# 14.9–17 views chart, spikes highlighted · 27.4–29.4 formats · 30–31.2 code words · 32.5–34.6 calls to action, audience
+a1, a2 = p0 + 30, p0 + 38
+pphone(cast("open", 1.3, 3.3, p0, a1, 0.03) + cast("load", 3.4, 4.4, a1, a2, 0.03) + cast("rep", 4.4, 4.4 + (i1 - a2) / 30 * 1.5, a2, i1, 0.03)
+       + cast("spikes", 14.9, 17.0, i1, i2, 0.16)
+       + cast("tops", 4.6, 6.6, i2, i3, 0.16)
+       + cast("formats", 27.4, 29.4, i3, i4, 0.28)
+       + cast("words", 30.0, 31.2, i4, i5, 0.17)
+       + cast("etc", 32.5, 34.6, i5, p1, 0.2), p0, p1)
+cap(F(71), cw("сделать", p0, 64) + cw("такой", F(70), 64))
+cap(i1, cw("анализ", F(71), 104, "serif", "line-height:1", fx="pop") + cw("аккаунта", F(72), 104, "serif acc", "line-height:1"))
+cap(i2, num("01", i1) + cw("охватные", i1, 62), cw("всплески", F(74), 110, "serif acc", "line-height:1"))
+cap(i3, num("02", i2) + cw("топы‑", i2, 76, "serif acc", "margin-right:0") + cw("антитопы", F(76), 76, "serif", "margin-left:0"), cw("роликов", F(77), 62))
+cap(i4, num("03", i3) + cw("повторяющиеся", i3, 60), cw("форматы", F(79), 110, "serif acc", "line-height:1"))
+cap(i5, num("04", i4) + cw("кодовые", i4, 62), cw("слова", F(81), 110, "serif acc", "line-height:1"))
+cap(p1, cw("и", i5, 70) + cw("так", F(83), 70) + cw("далее", F(84), 70))
 # «Всё тут» — he points up: the address is typed in a bar above the head, then stays alone on the end card
-L.url("writelo.io", F(85) - 6, c4, 190, accent_from=7, dur=14, size=128, bar=True)
+L.url("writelo.io", p1, c4, 190, accent_from=7, dur=14, size=128, bar=True)
 L.group(front, Y + 30, c4, [w("всё", F(85), "sans") + w("тут", F(86), "serif acc", style="font-size:130px") + L.arrow(F(86), c4, size=110, down=False)])
-for s in [("cut_cam", c3, -10), ("impact", F(71), -10), ("thump", F(71), -13), ("accent", F(72), -7), ("tact", F(73), -7), ("tact", F(75), -7),
-          ("tact", F(78), -7), ("tact", F(80), -7), ("swish1", F(82), -10), ("typing", F(85) - 6, -6), ("bell", F(86), -9), ("thump", F(86), -13)]: L.sfx(*s)
+for s in [("cut_cam", c3, -10), ("swish2", p0, -9), ("ui", p0 + 24, -6), ("impact", F(71), -11), ("accent", F(72), -7), ("tact", i1, -7), ("tact", i2, -7),
+          ("tact", i3, -7), ("tact", i4, -7), ("swish1", i5, -10), ("swish2", p1, -10), ("typing", p1, -6), ("bell", F(86), -9), ("thump", F(86), -13)]: L.sfx(*s)
 
 # ── end card (grid): the address alone, long enough to read
 L.group(front, 560, END, [w("анализ", c4, "sans", fx="cut") + w("аккаунта", c4, "sans", fx="cut")])

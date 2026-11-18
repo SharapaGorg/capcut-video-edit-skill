@@ -43,6 +43,7 @@ with sync_playwright() as p:
     sil = page.evaluate("SIL")          # [[from, to, fill_y or null], ...]
     rims = page.evaluate("typeof RIM === 'undefined' ? [] : RIM")        # [[from, to, [r, g, b], width], ...]
     flashes = page.evaluate("typeof FLASH === 'undefined' ? [] : FLASH")  # [[from, to, kind, [r, g, b]], ...]
+    plates = {f0 + k: p for f0, ps in page.evaluate("typeof PLATE === 'undefined' ? [] : PLATE") for k, p in enumerate(ps)}   # frame -> jpg
     print("BIG", json.dumps(page.evaluate("BIG"), ensure_ascii=False))
 
     boxes = {}
@@ -53,6 +54,10 @@ with sync_playwright() as p:
         return np.asarray(Image.open(io.BytesIO(page.screenshot(omit_background=True, type="png"))).convert("RGBA"))
 
     def frame(f, B, A):
+        if f in plates:                                 # pre-rendered full frame: only the front layer goes on top
+            front = shot(f, "front"); o = np.asarray(Image.open(plates[f]).convert("RGB")).astype(np.float32)
+            if front is not None: o = over(o, front)
+            return np.clip(o + 0.5, 0, 255).astype(np.uint8), None
         s = next((x for x in sil if x[0] <= f < x[1]), None)
         back, front = shot(f, "back"), shot(f, "front")
         o = B.astype(np.float32)

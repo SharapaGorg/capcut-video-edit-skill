@@ -23,6 +23,7 @@ class Layout:
         self.back, self.front, self.ev = [], [], []
         self.sil, self.FACE, self.EYES, self.SEAMY = [], {}, {}, {}
         self.rims, self.flashes = [], []
+        self.plates = []                               # [f0, [jpg, ...]]: pre-rendered full frames (footage scenes)
         self.cream, self.orange, self.ink = CREAM, ORANGE, INK
         self._uid = 0
         self.music_rel = -16.0                         # music level under the voice, LU (−12 was «пиздец громкая», 2026-11-17)
@@ -285,6 +286,12 @@ class Layout:
         c = (color or self.orange).lstrip("#")
         self.rims.append([f, f_out, [int(c[i:i + 2], 16) for i in (0, 2, 4)], width])
 
+    def plate(self, f, files):
+        """pre-rendered FULL frames (a footage scene made outside the kit, already drawn over this base) from frame f on, one jpg per frame.
+        compose takes them as the picture of those frames instead of room + person + back layer; the front layer still goes on top.
+        Not <img> in the html: hundreds of 1080x1920 images make Chromium time out on load / screenshot."""
+        self.plates.append([f, [str(p) for p in files]])
+
     def flash(self, f, n=2, kind="invert"):
         """the whole frame flashes for n frames on a hard cut: "invert" (negative), "white", "duo" (two-tone poster in the accent colour)"""
         c = self.orange.lstrip("#")
@@ -394,7 +401,7 @@ class Layout:
 
     def build(self):
         html = (HERE / "template.html").read_text(encoding="utf8")
-        data = f"const FACE={json.dumps(self.FACE)};const EYES={json.dumps(self.EYES)};const SIL={json.dumps(self.sil)};const SEAMY={json.dumps(self.SEAMY)};const RIM={json.dumps(self.rims)};const FLASH={json.dumps(self.flashes)};"
+        data = f"const FACE={json.dumps(self.FACE)};const EYES={json.dumps(self.EYES)};const SIL={json.dumps(self.sil)};const SEAMY={json.dumps(self.SEAMY)};const RIM={json.dumps(self.rims)};const FLASH={json.dumps(self.flashes)};const PLATE={json.dumps(self.plates)};"
         html = (html.replace("/*FONTS*/", (HERE.parent.parent / "assets" / "captions" / "fonts").as_uri())
                 .replace("<!--BACK-->", "\n".join(self.back)).replace("<!--FRONT-->", "\n".join(self.front))
                 .replace("/*DATA*/", data).replace("224,112,63", ",".join(str(int(self.orange[i:i + 2], 16)) for i in (1, 3, 5)))     # glows follow the accent
