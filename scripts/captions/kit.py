@@ -25,6 +25,7 @@ class Layout:
         self.rims, self.flashes = [], []
         self.cream, self.orange, self.ink = CREAM, ORANGE, INK
         self._uid = 0
+        self.music_rel = -16.0                         # music level under the voice, LU (−12 was «пиздец громкая», 2026-11-17)
         self.music_open = None                         # frame where the muffled music opens up (default: the first cut)
 
     # ───── words and time
@@ -400,5 +401,5 @@ class Layout:
                 .replace("CREAM", self.cream).replace("ORANGE", self.orange).replace("INK", self.ink))
         (self.wd / "gfx.html").write_text(html, encoding="utf8")
         mo = self.music_open if self.music_open is not None else (self.cuts[0] if self.cuts else 0)
-        json.dump(dict(music_open=round(mo / FPS, 4), sil=self.sil, events=[[k, round(f / FPS, 4), db] for k, f, db in self.ev]), open(self.wd / "sfx_events.json", "w"))
+        json.dump(dict(music_open=round(mo / FPS, 4), music_rel=self.music_rel, sil=self.sil, events=[[k, round(f / FPS, 4), db] for k, f, db in self.ev]), open(self.wd / "sfx_events.json", "w"))
         print(f"gfx.html ok; {len(self.ev)} sounds; silhouettes {self.sil}")

@@ -1,12 +1,12 @@
 """Captions layer over a finished rough render (voice only, no captions, no music).
-Usage: run.py <auto_dir> <stage> [--base out/rough_v1.mp4] [--name captions_v1] [--stills 10,45,90] [--music file.mp3] [--sfx-dir dir] [--force]
+Usage: run.py <auto_dir> <stage> [--base out/rough_v1.mp4] [--name captions_v1] [--stills 10,45,90] [--music file.mp3] [--sfx-dir dir] [--force] [--range a,b]
 The SFX pack folder (files — dictionary S in audio.py): --sfx-dir, else env CAPTIONS_SFX_DIR, else "sfx_dir" in assets/captions/local.json.
 
 Stages:
   prep    cuts, person matte, head track, whisper words of the render  -> <auto>/work/captions/   (slow: matte ≈ 4 fps)
   layout  runs <auto>/captions/layout.py  -> gfx.html, sfx_events.json
   stills  layout + the listed frames composed -> work/captions/stills/, stills.png (look at them before rendering)
-  render  layout + full video + both soundtracks + checks -> out/<name>.mp4, out/<name>_music.mp4, work/captions/report.json, sheet_*.png
+  render  layout + full video (--range a,b: only these frames again, the rest from the last render) + both soundtracks + checks -> out/<name>.mp4, out/<name>_music.mp4, work/captions/report.json, sheet_*.png
   audio   layout + sound only (remix and remux onto the last rendered video)
 """
 import json, os, subprocess, sys
@@ -129,6 +129,10 @@ elif stage == "stills": layout(); stills()
 elif stage == "audio": layout(); check(audio())
 elif stage == "render":
     layout()
-    sh(*PY, HERE / "compose.py", base, wd / "alpha.mkv", wd / "gfx.html", wd / "video.mp4", stdout=open(wd / "compose.log", "w"))
+    extra = []
+    if opt("--range"):                              # only frames a,b are composed again; the rest comes from the last render
+        import shutil
+        shutil.copy2(wd / "video.mp4", wd / "video.prev.mp4"); extra = ["--range", opt("--range"), "--prev", wd / "video.prev.mp4"]
+    sh(*PY, HERE / "compose.py", base, wd / "alpha.mkv", wd / "gfx.html", wd / "video.mp4", *extra, stdout=open(wd / "compose.log", "w"))
     check(audio())
 else: sys.exit(__doc__)

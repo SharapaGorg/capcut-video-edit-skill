@@ -1,5 +1,6 @@
 """Stack per frame: room -> words behind -> person (matte) -> words in front.
-Usage: compose.py base.mp4 alpha.mkv gfx.html out.mp4 [--stills f1,f2,... dir] [--audio a.m4a]
+Usage: compose.py base.mp4 alpha.mkv gfx.html out.mp4 [--stills f1,f2,... dir] [--audio a.m4a] [--range a,b --prev prev.mp4]
+--range a,b --prev: only frames a..b-1 are composed again, the rest is taken from the previous render (a fix of one scene = seconds, not minutes).
 Silhouette beats (SIL in the html): the room turns cream, the person turns black.
 Also writes <out>.check.json: how much of the behind-text the person hides, and the text bounding box per frame."""
 import io, json, subprocess, sys, time
@@ -12,6 +13,9 @@ base, alpha_f, html, out = sys.argv[1:5]
 stills = audio = None
 if "--stills" in sys.argv:
     i = sys.argv.index("--stills"); stills = [int(x) for x in sys.argv[i + 1].split(",")]; sdir = Path(sys.argv[i + 2]); sdir.mkdir(parents=True, exist_ok=True)
+rng = prev = None
+if "--range" in sys.argv:
+    rng = [int(x) for x in sys.argv[sys.argv.index("--range") + 1].split(",")]; prev = sys.argv[sys.argv.index("--prev") + 1]
 if "--audio" in sys.argv:
     audio = sys.argv[sys.argv.index("--audio") + 1]
 W, H, FPS = 1080, 1920, 30
@@ -104,9 +108,21 @@ with sync_playwright() as p:
                 "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-movflags", "+faststart", out]
         ep = subprocess.Popen(enc, stdin=subprocess.PIPE)
         f, t0, covs = 0, time.time(), {}
+        if rng:                                         # frames outside the range come from the previous render
+            rp, _ = reader(prev, "rgb24", 3)
+            ckf = Path(out).with_suffix(".check.json")
+            if ckf.exists():
+                old = json.load(open(ckf)); keep = lambda d: {k: v for k, v in d.items() if not rng[0] <= int(k) < rng[1]}
+                covs = {int(k): v for k, v in keep(old["cover"]).items()}; boxes.update({int(k): v for k, v in keep(old["boxes"]).items()})
         while True:
             b = rb.stdout.read(nb); a = ra.stdout.read(na)
             if len(b) < nb or len(a) < na: break
+            if rng:
+                pb = rp.stdout.read(nb)
+                if len(pb) < nb: break
+            if rng and not rng[0] <= f < rng[1]:
+                ep.stdin.write(pb); f += 1
+                continue
             img, cov = frame(f, np.frombuffer(b, np.uint8).reshape(H, W, 3), np.frombuffer(a, np.uint8).reshape(H, W))
             if cov is not None: covs[f] = round(cov, 3)
             ep.stdin.write(img.tobytes()); f += 1

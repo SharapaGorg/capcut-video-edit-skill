@@ -265,7 +265,7 @@ def plan(spec, words_all, speed=None, voice_dir=None, base=None):
             raise SystemExit(f"{sec['id']}: нет слов для {sec['voice']} в words.json")
         segs = speech_segments(Path(voice_dir) / sec['voice']) if voice_dir else None
         rng = ranges_of(sec)
-        if segs is not None:
+        if segs is not None and sec.get('snap', True):   # section "snap": false — keep v exactly (a noise glued to the phrase, e.g. a rustling mic cable, makes one energy blob and the snap would jump over the phrase)
             rng = [list(snap_range(segs, a, b)) for a, b in rng]
             sec['v_snapped'] = rng
         if sec.get('script'):

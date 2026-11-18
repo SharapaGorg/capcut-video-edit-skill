@@ -45,9 +45,10 @@ S = {
     "flash":     (A + "ЭФФЕКТЫ/ДЛИННЫЕ/Camera Flash.wav", 0.09, 0.80, 0.18, 0.0, 0.25),
     "glitch2":   (A + "ЭФФЕКТЫ/КОРОТКИЕ/glitch 1.wav", 0.08, 0.34, 0.19, 0.0, 0.05),
 }
-MUSIC_REL, MUSIC_FROM, TARGET = -12.0, 20.0, -14.0
+MUSIC_REL, MUSIC_FROM, TARGET = -16.0, 20.0, -14.0
 job = json.load(open(ev_f))
-EVENTS, MUSIC_IN = job["events"], job["music_open"]      # the music is muffled under the hook and opens on the cut at MUSIC_IN
+EVENTS, MUSIC_IN = job["events"], job["music_open"]
+MUSIC_REL = float(job.get("music_rel", MUSIC_REL))            # LU of the music under the voice (L.music_rel in the layout)      # the music is muffled under the hook and opens on the cut at MUSIC_IN
 
 def load(path, pre=None):
     import glob, os
