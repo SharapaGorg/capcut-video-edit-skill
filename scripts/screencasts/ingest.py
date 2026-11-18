@@ -10,14 +10,14 @@ clips/<id>.mp4 (no audio), work/<id>/sheet.jpg (2 fps, time on every frame), and
 niche, query, named segments, privacy) are filled by hand after looking at the sheet — see
 references/screencasts.md. Labels are never overwritten by a re-run.
 """
-import argparse, hashlib, json, shutil, subprocess, sys, tempfile
+import argparse, os, hashlib, json, shutil, subprocess, sys, tempfile
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-LIB = Path(r"C:\Users\shara\Videos\рилсики\_screencasts")
+LIB = Path(os.environ.get("WRITELO_SCREENCASTS", Path.home() / "Videos" / "рилсики" / "_screencasts"))
 TESS = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 TESSDATA = Path(__file__).resolve().parents[2] / "assets" / "tessdata"   # rus+eng; ASCII path: tesseract cannot open Cyrillic paths
 FPS = 6          # analysis rate

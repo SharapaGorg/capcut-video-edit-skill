@@ -26,7 +26,8 @@ SKIP_DIRS = {".git", ".superpowers", "__pycache__", ".pytest_cache"}
 #   init_video.py          creates config.json, there is none yet
 #   capcut_new_project.py  creates a NEW project folder (EXPERIMENTAL), not an edit of config's project
 NO_CONFIG = {"init_video.py", "capcut_new_project.py", "beats.py", "voice_ref.py",   # beats.py: library + debug print, no argparse; voice_ref.py: audio file -> file, no project
-             "build_reel.py", "validate_reel.py", "peephole.py", "screen_cut.py"}                    # reel from scratch: a spec path, no CapCut project / config.json
+             "build_reel.py", "validate_reel.py", "peephole.py", "screen_cut.py",                    # reel from scratch: a spec path, no CapCut project / config.json
+             "ingest.py", "lib.py"}                                                                  # screencast library: its own folder, no project
 
 
 def _skill_files():

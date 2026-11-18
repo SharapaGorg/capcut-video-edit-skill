@@ -9,11 +9,11 @@ CLI:  python -X utf8 lib.py list [--surface S] [--niche N] [--action A]
       python -X utf8 lib.py show <id>
       python -X utf8 lib.py rename <old> <new>       # after labelling a new-… clip from the inbox
 """
-import argparse, json, sys
+import argparse, os, json, sys
 from datetime import date
 from pathlib import Path
 
-LIB = Path(r"C:\Users\shara\Videos\рилсики\_screencasts")
+LIB = Path(os.environ.get("WRITELO_SCREENCASTS", Path.home() / "Videos" / "рилсики" / "_screencasts"))
 
 
 def load(lib=LIB):
