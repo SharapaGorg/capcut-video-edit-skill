@@ -103,6 +103,7 @@ cwd = рабочая папка ролика (там `config.json`); скрип�
 | Reels | references/reels.md | `scripts/shorts/build.py --reels` |
 | TikTok | references/tiktok.md | `scripts/shorts/build.py --tiktok` |
 | Рилс с нуля | references/reel.md | `scripts/reel/{build_reel,validate_reel}.py` (спека + whisper-слова → mp4; схема, UI-макеты, стикеры, мемы, музыка, −17.5 LUFS), `scripts/reel/{footage,fx,screen_cut,peephole}.py` (полноэкранный футаж, эффекты секций, нарезка скринкаста, «глазок») |
+| Скринкасты Writelo | references/screencasts.md | `scripts/screencasts/{ingest,lib}.py` (библиотека `рилсики\_screencasts`: разбор новых записей из inbox, поиск куска под фразу, `used_in`; перед любым рилсом про сервис — сначала сюда) |
 | Рилс «слова за головой» | references/captions.md; references/captions/style.md, references/captions/techniques.md, references/captions/sound.md, references/captions/feedback.md, references/captions/rough.md, references/captions/sources.md | `scripts/captions/run.py` (этапы prep / stills / render / audio), `scripts/captions/{kit,compose,audio,matte,heads,cuts,words,prep,extend}.py`; раскладка `<проект>/auto/captions/layout.py` |
 | Описание рилса | references/description.md | — |
 
